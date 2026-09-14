@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kelime Defterim</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Kelime Defterim</h1>
+    <p id="lang-status" class="lang-status" hidden></p>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="words">Kelimeler</button>
+      <button class="tab-btn" data-tab="sentences">Cümleler</button>
+      <button class="tab-btn" data-tab="stats">İstatistik</button>
+      <button class="tab-btn" data-tab="flashcards">Flash Kart</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- KELİMELER -->
+    <section id="tab-words" class="tab-panel active">
+      <h2>Kelime Ekle</h2>
+      <form id="word-form" class="row">
+        <input type="text" id="word-input" placeholder="Yeni kelime" autocomplete="off">
+        <button type="button" id="word-kanji-btn" class="kanji-btn">漢字</button>
+        <button type="submit">Ekle</button>
+      </form>
+      <div id="word-kanji-candidates" class="chips kanji-candidates" hidden></div>
+
+      <h3>Tür seç (boş bırakırsan otomatik algılanır)</h3>
+      <div id="new-word-type-chips" class="chips"></div>
+
+      <h3>Bu kelime için kategori seç (birden fazla seçebilirsin)</h3>
+      <div id="new-word-chips" class="chips"></div>
+
+      <h3>Kelime ara</h3>
+      <input type="text" id="word-search" class="search-input" placeholder="Kanji, kana veya okunuş yaz..." autocomplete="off">
+
+      <h3>Kategoriye göre filtrele (birden fazla seçebilirsin)</h3>
+      <div id="filter-chips" class="chips"></div>
+
+      <h3>Türe göre filtrele (birden fazla seçebilirsin)</h3>
+      <div id="type-filter-chips" class="chips"></div>
+
+      <ul id="word-list" class="item-list"></ul>
+    </section>
+
+    <!-- CÜMLELER -->
+    <section id="tab-sentences" class="tab-panel">
+      <h2>Cümle Ekle</h2>
+      <form id="sentence-form" class="row">
+        <textarea id="sentence-input" placeholder="Yeni cümle yaz..."></textarea>
+        <button type="button" id="sentence-kanji-btn" class="kanji-btn">漢字</button>
+        <button type="button" id="sentence-grammar-btn" class="kanji-btn">Gramer Kontrolü</button>
+        <button type="submit">Cümleyi Kaydet</button>
+      </form>
+      <div id="sentence-kanji-candidates" class="chips kanji-candidates" hidden></div>
+      <div id="sentence-grammar-result" class="grammar-result" hidden></div>
+
+      <h2>Kayıtlı Cümleler (<span id="sentence-count">0</span>)</h2>
+      <ul id="sentence-list" class="item-list"></ul>
+    </section>
+
+    <!-- İSTATİSTİK -->
+    <section id="tab-stats" class="tab-panel">
+      <h3>Kelime ara</h3>
+      <input type="text" id="stats-search" class="search-input" placeholder="Kanji, kana veya okunuş yaz..." autocomplete="off">
+
+      <h3>Kategoriye göre filtrele (birden fazla seçebilirsin)</h3>
+      <div id="stats-filter-chips" class="chips"></div>
+
+      <h3>Türe göre filtrele (birden fazla seçebilirsin)</h3>
+      <div id="stats-type-filter-chips" class="chips"></div>
+
+      <p id="stats-summary" class="summary"></p>
+      <ul id="stats-list" class="item-list"></ul>
+    </section>
+
+    <!-- FLASH KART -->
+    <section id="tab-flashcards" class="tab-panel">
+      <h3>Kelime ara</h3>
+      <input type="text" id="flashcard-search" class="search-input" placeholder="Kanji, kana veya okunuş yaz..." autocomplete="off">
+
+      <h3>Kategoriye göre filtrele (birden fazla seçebilirsin)</h3>
+      <div id="flashcard-filter-chips" class="chips"></div>
+
+      <h3>Türe göre filtrele (birden fazla seçebilirsin)</h3>
+      <div id="flashcard-type-filter-chips" class="chips"></div>
+
+      <p id="flashcard-counter" class="summary"></p>
+      <p id="flashcard-empty" class="empty-text" hidden></p>
+
+      <div id="flashcard-card" class="flashcard" hidden>
+        <div class="flashcard-inner">
+          <div class="flashcard-face flashcard-front">
+            <div id="flashcard-front-word" class="flashcard-word"></div>
+            <div class="flashcard-hint">Çevirmek için dokun</div>
+          </div>
+          <div class="flashcard-face flashcard-back">
+            <div id="flashcard-back-word" class="flashcard-word"></div>
+            <div id="flashcard-back-type" class="flashcard-meta"></div>
+            <div id="flashcard-back-cats" class="flashcard-meta"></div>
+            <div class="flashcard-example-label">Örnek cümle</div>
+            <div id="flashcard-back-example" class="flashcard-example"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flashcard-controls">
+        <button type="button" id="flashcard-prev">← Önceki</button>
+        <button type="button" id="flashcard-flip">Çevir</button>
+        <button type="button" id="flashcard-random">🔀 Rastgele</button>
+        <button type="button" id="flashcard-next">Sonraki →</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <button id="seed-data-btn" class="seed-btn" type="button">Örnek 100 kelime + 20 cümle + 2 paragraf yükle</button>
+  </footer>
+
+  <script src="vendor/wanakana.min.js"></script>
+  <script src="vendor/kuromoji.js"></script>
+  <script>window.kuromojin = { dicPath: 'vendor/dict/' };</script>
+  <script src="vendor/ja-grammar-check.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
