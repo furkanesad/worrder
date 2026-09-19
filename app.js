@@ -362,25 +362,60 @@ function renderKanjiCandidates(containerId, candidates, inputEl) {
   });
 }
 
-// ---------- Cümle çevirisi (Google Translate) ----------
+// ---------- Cümle/kelime çevirisi (makine çevirisi, internet gerekir) ----------
 // Tamamen offline bir makine çevirisi motoru tarayıcıda barındırılamayacak
-// kadar büyük olduğundan, kanji dönüştürmede olduğu gibi Google'ın herkese
-// açık (anahtarsız) çeviri uç noktasına bağlanıyoruz — bu, çevrilecek cümle
-// metninin internet üzerinden Google'a gönderilmesi anlamına gelir.
+// kadar büyük olduğundan, kanji dönüştürmede olduğu gibi herkese açık
+// (anahtarsız) çeviri servislerine bağlanıyoruz — bu, çevrilecek metnin
+// internet üzerinden bu servislere gönderilmesi anlamına gelir.
+//
+// İki sağlayıcı sırayla denenir: önce Google'ın herkese açık uç noktası
+// (genelde en iyi kaliteyi verir), o başarısız olursa (ağ engeli, zaman
+// aşımı, tarayıcı/ağ kısıtlaması vb.) otomatik olarak MyMemory'ye (resmi,
+// belgelenmiş, CORS destekli ücretsiz bir çeviri API'si) düşülür — böylece
+// sağlayıcılardan biri erişilemez olsa bile çeviri çalışmaya devam eder.
+
+function fetchWithTimeout(url, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+async function translateViaGoogle(text, sourceLang) {
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=tr&dt=t&q=${encodeURIComponent(text)}`;
+  const res = await fetchWithTimeout(url, 8000);
+  if (!res.ok) throw new Error('google http ' + res.status);
+  const data = await res.json();
+  if (!Array.isArray(data) || !Array.isArray(data[0]) || !data[0].length) throw new Error('google boş yanıt');
+  return data[0].map((seg) => seg[0]).join('');
+}
+
+async function translateViaMyMemory(text, sourceLang) {
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|tr`;
+  const res = await fetchWithTimeout(url, 8000);
+  if (!res.ok) throw new Error('mymemory http ' + res.status);
+  const data = await res.json();
+  const translated = data && data.responseData && data.responseData.translatedText;
+  if (!translated) throw new Error('mymemory boş yanıt');
+  return translated;
+}
 
 async function translateText(text, sourceLang) {
   const trimmed = (text || '').trim();
   if (!trimmed) return null;
+
   try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=tr&dt=t&q=${encodeURIComponent(trimmed)}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!Array.isArray(data) || !Array.isArray(data[0])) return null;
-    return data[0].map((seg) => seg[0]).join('');
+    return await translateViaGoogle(trimmed, sourceLang);
   } catch (e) {
-    console.error('Çeviri alınamadı:', e);
-    return null;
+    console.error('Google çeviri başarısız, MyMemory deneniyor:', e);
   }
+
+  try {
+    return await translateViaMyMemory(trimmed, sourceLang);
+  } catch (e) {
+    console.error('MyMemory çeviri de başarısız:', e);
+  }
+
+  return null;
 }
 
 function renderTranslationResult(container, translation) {
