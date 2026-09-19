@@ -279,14 +279,52 @@ button:hover {
 }
 
 .parse-result {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
   margin: -4px 0 8px;
   padding: 10px 12px;
   border-radius: 8px;
   background: #fafafa;
   border: 1px solid #e5e5e5;
+}
+
+.parse-tokens-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.parse-grammar-list {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #ddd;
+}
+
+.parse-grammar-title {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.parse-grammar-list ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.parse-grammar-list li {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #333;
+}
+
+.parse-grammar-tag {
+  display: inline-block;
+  background: #eef4ff;
+  color: #3478f6;
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-weight: 600;
+  font-size: 12px;
+  margin-right: 6px;
 }
 
 .parse-token {

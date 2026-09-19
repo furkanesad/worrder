@@ -1227,12 +1227,58 @@ const KO_PARTICLE_LABELS = {
   '으로': 'yön/araç', '로': 'yön/araç',
 };
 
-function renderParseResultJa(container, text) {
-  const tokens = jaAnalyze(text);
-  if (!tokens) {
-    container.textContent = 'Analiz motoru henüz hazır değil, biraz bekleyip tekrar dene.';
-    return;
+// Sabit kalıp eşleşmeleri (ことがある, てもいい gibi isimli JLPT gramer
+// noktaları) düz metin üzerinde aranır — bunlar morfolojik analiz değil,
+// belirli, tanınabilir ifade kalıplarıdır. Fiil çekimine dayalı olanlar
+// (geçmiş zaman, olumsuzluk, ます-form) ise kuromoji token'larından
+// (gerçek 助動詞/basic_form bilgisiyle) tespit edilir — çok daha güvenilir.
+const JA_GRAMMAR_PATTERNS = [
+  { re: /ことが(あります|ある)/, label: '〜ことがある', note: 'Deneyim: daha önce yapmış olmak' },
+  { re: /なければ(なりません|ならない)|なきゃ/, label: '〜なければならない', note: 'Zorunluluk: yapmak zorunda' },
+  { re: /て(も|でも)いい(です)?/, label: '〜てもいい', note: 'İzin: yapabilirsin' },
+  { re: /ないでください/, label: '〜ないでください', note: 'Rica: yapma' },
+  { re: /たり.+たり(します|する)/, label: '〜たり〜たりする', note: 'Örnek eylemleri sıralama' },
+  { re: /かもしれ(ません|ない)/, label: '〜かもしれない', note: 'İhtimal: belki' },
+  { re: /と思(います|う)/, label: '〜と思う', note: 'Düşünce/fikir bildirme' },
+  { re: /て(います|いる)/, label: '〜ている', note: 'Şimdiki zaman / devam eden eylem' },
+  { re: /ので/, label: '〜ので', note: 'Sebep bağlacı' },
+  { re: /れば|えば|けば|げば|せば|てば|ねば|べば|めば/, label: '〜ば', note: 'Koşul: eğer...ise' },
+];
+
+function detectJaGrammarPatterns(text, tokens) {
+  const found = JA_GRAMMAR_PATTERNS.filter((p) => p.re.test(text));
+  if (tokens) {
+    if (tokens.some((t) => t.pos === '助動詞' && t.base === 'た')) {
+      found.push({ label: '過去形 (〜た/だ)', note: 'Geçmiş zaman' });
+    }
+    if (tokens.some((t) => t.pos === '助動詞' && t.base === 'ない')) {
+      found.push({ label: '〜ない', note: 'Olumsuzluk' });
+    }
+    if (tokens.some((t) => t.pos === '助動詞' && t.base === 'ます')) {
+      found.push({ label: '〜ます', note: 'Kibar şimdiki/gelecek zaman' });
+    }
   }
+  return found;
+}
+
+const KO_GRAMMAR_PATTERNS = [
+  { re: /적이\s?있(어요|습니다|다)/, label: '-(으)ㄴ 적이 있다', note: 'Deneyim: daha önce yapmış olmak' },
+  { re: /(아|어|해)도\s?(돼요|됩니다)/, label: '-아/어도 되다', note: 'İzin: yapabilirsin' },
+  { re: /(으)?ㄹ\s?수\s?있(어요|습니다)|을\s?수\s?있(어요|습니다)/, label: '-(으)ㄹ 수 있다', note: 'Yapabilme/potansiyel' },
+  { re: /것\s?같(아요|습니다)/, label: '-것 같다', note: 'Tahmin: gibi görünüyor' },
+  { re: /지만/, label: '-지만', note: 'Zıtlık: ama' },
+  { re: /(았|었|였)(어요|습니다|다)/, label: '-았/었- (geçmiş zaman)', note: 'Geçmiş zaman' },
+  { re: /(아|어|해)서/, label: '-아/어서', note: 'Sebep bağlacı' },
+  { re: /고\s?있(어요|습니다)/, label: '-고 있다', note: 'Şimdiki zaman / devam eden eylem' },
+  { re: /(으)?면[,、]/, label: '-(으)면', note: 'Koşul: eğer...ise' },
+  { re: /(이에요|예요)/, label: '-이에요/예요', note: 'İsim cümlesi bitişi ("X-dir")' },
+];
+
+function detectKoGrammarPatterns(text) {
+  return KO_GRAMMAR_PATTERNS.filter((p) => p.re.test(text));
+}
+
+function renderParseResultJa(container, tokens) {
   tokens.forEach((t) => {
     if (t.pos === '記号') return;
     const hira = (t.reading && typeof wanakana !== 'undefined') ? wanakana.toHiragana(t.reading) : '';
@@ -1274,9 +1320,40 @@ function renderParseResult(containerId, text) {
   if (!container) return;
   container.hidden = false;
   container.innerHTML = '';
-  if (currentLang === 'ko') renderParseResultKo(container, text);
-  else renderParseResultJa(container, text);
-  if (!container.children.length && !container.textContent) container.textContent = 'Çözümlenecek bir şey yok.';
+
+  const tokensRow = document.createElement('div');
+  tokensRow.className = 'parse-tokens-row';
+  container.appendChild(tokensRow);
+
+  let jaTokens = null;
+  if (currentLang === 'ko') {
+    renderParseResultKo(tokensRow, text);
+  } else {
+    jaTokens = jaAnalyze(text);
+    if (!jaTokens) tokensRow.textContent = 'Analiz motoru henüz hazır değil, biraz bekleyip tekrar dene.';
+    else renderParseResultJa(tokensRow, jaTokens);
+  }
+  if (!tokensRow.children.length && !tokensRow.textContent) tokensRow.textContent = 'Çözümlenecek bir şey yok.';
+
+  // Gramer odaklı bölüm: kelime türü yerine cümlede geçen isimli gramer
+  // kalıplarını (JLPT/TOPIK ders kitaplarındaki gibi) tespit edip listeler.
+  const patterns = currentLang === 'ko' ? detectKoGrammarPatterns(text) : detectJaGrammarPatterns(text, jaTokens);
+  if (patterns.length) {
+    const grammarBox = document.createElement('div');
+    grammarBox.className = 'parse-grammar-list';
+    const title = document.createElement('div');
+    title.className = 'parse-grammar-title';
+    title.textContent = 'Gramer kalıpları:';
+    grammarBox.appendChild(title);
+    const ul = document.createElement('ul');
+    patterns.forEach((p) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="parse-grammar-tag">${escapeHtml(p.label)}</span> ${escapeHtml(p.note)}`;
+      ul.appendChild(li);
+    });
+    grammarBox.appendChild(ul);
+    container.appendChild(grammarBox);
+  }
 }
 
 function getMissingWordsForSentence(text) {
