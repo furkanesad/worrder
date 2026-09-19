@@ -362,6 +362,58 @@ function renderKanjiCandidates(containerId, candidates, inputEl) {
   });
 }
 
+// ---------- Cümle çevirisi (Google Translate) ----------
+// Tamamen offline bir makine çevirisi motoru tarayıcıda barındırılamayacak
+// kadar büyük olduğundan, kanji dönüştürmede olduğu gibi Google'ın herkese
+// açık (anahtarsız) çeviri uç noktasına bağlanıyoruz — bu, çevrilecek cümle
+// metninin internet üzerinden Google'a gönderilmesi anlamına gelir.
+
+async function translateText(text, sourceLang) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return null;
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=tr&dt=t&q=${encodeURIComponent(trimmed)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!Array.isArray(data) || !Array.isArray(data[0])) return null;
+    return data[0].map((seg) => seg[0]).join('');
+  } catch (e) {
+    console.error('Çeviri alınamadı:', e);
+    return null;
+  }
+}
+
+function renderTranslationResult(container, translation) {
+  container.hidden = false;
+  if (translation === null) {
+    container.textContent = 'Çeviri alınamadı, internet bağlantısını kontrol et.';
+    return;
+  }
+  container.textContent = translation;
+}
+
+// Bir çeviri butonunu kurar: sonucu cümle nesnesinde (cache) tutar ki aynı
+// cümle tekrar tekrar Google'a gönderilmesin.
+function setupTranslateButton(btn, resultEl, sentenceObj, onCached) {
+  btn.addEventListener('click', async () => {
+    if (sentenceObj.translation) {
+      resultEl.hidden = !resultEl.hidden;
+      return;
+    }
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+    const translation = await translateText(sentenceObj.text, currentLang);
+    btn.disabled = false;
+    btn.textContent = original;
+    renderTranslationResult(resultEl, translation);
+    if (translation !== null) {
+      sentenceObj.translation = translation;
+      onCached();
+    }
+  });
+}
+
 function setupKanjiButton(btnId, inputId, candidatesId) {
   const btn = document.getElementById(btnId);
   const input = document.getElementById(inputId);
@@ -961,6 +1013,82 @@ function setupSearchInputs() {
   });
 }
 
+// ---------- Cümledeki eksik kelimeleri kelime defterine ekleme ----------
+// Japonca'da kuromoji tokenlerinden içerik kelimesi (isim/fiil/sıfat)
+// çıkarılır. Korece'de gerçek bir morfolojik analizör olmadığından, Korece
+// metin zaten boşlukla ayrıldığı (어절) için cümle boşluklara bölünüp yaygın
+// sonekler (조사) kabaca kırpılıyor — kesin değil ama kullanışlı bir tahmin.
+
+const KO_PARTICLE_SUFFIXES = ['에서', '에게', '한테', '까지', '부터', '이랑', '하고', '와', '과', '의', '도', '만', '은', '는', '이', '가', '을', '를', '에', '으로', '로']
+  .sort((a, b) => b.length - a.length);
+
+function extractContentWordsJa(text) {
+  const tokens = jaAnalyze(text);
+  if (!tokens) return [];
+  const seen = new Set();
+  const result = [];
+  tokens.forEach((t) => {
+    const group = JA_TYPE_FILTER_GROUPS[effectivePos(t)];
+    if (group !== 'İsim' && group !== 'Fiil' && group !== 'Sıfat') return;
+    if (!t.base || seen.has(t.base)) return;
+    seen.add(t.base);
+    result.push(t.base);
+  });
+  return result;
+}
+
+function extractContentWordsKo(text) {
+  const chunks = text.split(/\s+/).map((c) => c.replace(/[.,!?~…"'()]/g, '')).filter(Boolean);
+  const seen = new Set();
+  const result = [];
+  chunks.forEach((chunk) => {
+    let word = chunk;
+    for (const suf of KO_PARTICLE_SUFFIXES) {
+      if (word.length > suf.length && word.endsWith(suf)) { word = word.slice(0, -suf.length); break; }
+    }
+    if (!word || seen.has(word)) return;
+    seen.add(word);
+    result.push(word);
+  });
+  return result;
+}
+
+function getMissingWordsForSentence(text) {
+  const candidates = currentLang === 'ko' ? extractContentWordsKo(text) : extractContentWordsJa(text);
+  const existing = new Set(words.map((w) => normalize(w.text)));
+  return candidates.filter((c) => !existing.has(normalize(c)));
+}
+
+function renderMissingWordChips(containerId, text) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const missing = getMissingWordsForSentence(text);
+  container.innerHTML = '';
+  if (missing.length === 0) return;
+
+  const label = document.createElement('span');
+  label.className = 'missing-words-label';
+  label.textContent = 'Eksik kelimeler:';
+  container.appendChild(label);
+
+  missing.forEach((word) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip chip-add';
+    chip.textContent = `+ ${word}`;
+    chip.title = 'Kelime defterine ekle';
+    chip.addEventListener('click', () => {
+      words.push({ id: makeId(), text: word, categoryIds: [], type: null });
+      saveWords();
+      renderNewWordChips();
+      renderWordList();
+      renderStats();
+      renderFlashcard();
+      renderMissingWordChips(containerId, text);
+    });
+    container.appendChild(chip);
+  });
+}
+
 // ---------- Cümleler sekmesi ----------
 
 function renderSentenceList() {
@@ -978,10 +1106,14 @@ function renderSentenceList() {
     li.style.alignItems = 'flex-start';
 
     const grammarResultId = `sent-grammar-${s.id}`;
+    const translationId = `sent-translate-${s.id}`;
+    const missingWordsId = `sent-missing-${s.id}`;
     const main = document.createElement('div');
     main.className = 'item-main';
     main.innerHTML = `<div class="item-title">${displayHtml(s.text)}</div>
-      <div class="grammar-result" id="${grammarResultId}" hidden></div>`;
+      <div class="translation-result" id="${translationId}" ${s.translation ? '' : 'hidden'}>${s.translation ? escapeHtml(s.translation) : ''}</div>
+      <div class="grammar-result" id="${grammarResultId}" hidden></div>
+      <div class="chips missing-words" id="${missingWordsId}"></div>`;
 
     const btnWrap = document.createElement('div');
     btnWrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex-shrink:0;';
@@ -1002,6 +1134,15 @@ function renderSentenceList() {
       if (resultEl) renderGrammarResult(resultEl, outcome);
     });
 
+    const translateBtn = document.createElement('button');
+    translateBtn.className = 'kanji-btn';
+    translateBtn.style.padding = '4px 8px';
+    translateBtn.style.fontSize = '12px';
+    translateBtn.textContent = 'Çevir';
+    // main henüz list'e eklenmediği (document'a bağlanmadığı) için
+    // document.getElementById burada çalışmaz — main içinde arıyoruz.
+    setupTranslateButton(translateBtn, main.querySelector(`#${translationId}`), s, saveSentences);
+
     const delBtn = document.createElement('button');
     delBtn.className = 'del-btn';
     delBtn.textContent = 'Sil';
@@ -1014,12 +1155,15 @@ function renderSentenceList() {
     });
 
     if (currentLang === 'ja') btnWrap.appendChild(grammarBtn);
+    btnWrap.appendChild(translateBtn);
     btnWrap.appendChild(makeSpeakButton(s.text, speakLangCode()));
     btnWrap.appendChild(delBtn);
 
     li.appendChild(main);
     li.appendChild(btnWrap);
     list.appendChild(li);
+
+    renderMissingWordChips(missingWordsId, s.text);
   });
 }
 
