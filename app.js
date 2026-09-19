@@ -939,14 +939,29 @@ function renderWordList() {
 
   filtered.forEach((w) => {
     const li = document.createElement('li');
+    li.style.alignItems = 'flex-start';
+    const subId = `word-sub-${w.id}`;
+    const catsEditorId = `word-cats-editor-${w.id}`;
 
     const main = document.createElement('div');
     main.className = 'item-main';
     main.innerHTML = `<div class="item-title">${displayHtml(w.text)}</div>
-      <div class="item-sub">${escapeHtml(wordSubLabel(w))}</div>`;
+      <div class="item-sub" id="${subId}">${escapeHtml(wordSubLabel(w))}</div>
+      <div class="chips cats-editor" id="${catsEditorId}" hidden></div>`;
 
     const btnWrap = document.createElement('div');
-    btnWrap.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
+    btnWrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex-shrink:0;';
+
+    const catsBtn = document.createElement('button');
+    catsBtn.className = 'kanji-btn';
+    catsBtn.style.padding = '4px 8px';
+    catsBtn.style.fontSize = '12px';
+    catsBtn.textContent = 'Kategori';
+    catsBtn.addEventListener('click', () => {
+      const editor = main.querySelector(`#${catsEditorId}`);
+      editor.hidden = !editor.hidden;
+      if (!editor.hidden) renderWordCategoryEditor(catsEditorId, w, subId);
+    });
 
     const delBtn = document.createElement('button');
     delBtn.className = 'del-btn';
@@ -959,12 +974,48 @@ function renderWordList() {
       renderFlashcard();
     });
 
+    btnWrap.appendChild(catsBtn);
     btnWrap.appendChild(makeSpeakButton(w.text, speakLangCode()));
     btnWrap.appendChild(delBtn);
 
     li.appendChild(main);
     li.appendChild(btnWrap);
     list.appendChild(li);
+  });
+}
+
+// Bir kelimenin kategori çipleri panelini (var olan tüm kategoriler,
+// seçili olanlar vurgulu) oluşturur/günceller. Bir çipe tıklamak o kategoriyi
+// anında ekler/çıkarır — tüm listeyi yeniden çizmeden sadece bu kelimenin
+// alt etiketini ve panelin kendisini günceller (açık panel kapanmasın diye).
+function renderWordCategoryEditor(containerId, w, subId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (categories.length === 0) {
+    container.innerHTML = '<span class="empty-text" style="padding:2px 0;">Henüz kategori yok — Kelime Ekle bölümünden yeni kategori oluşturabilirsin.</span>';
+    return;
+  }
+
+  categories.forEach((cat) => {
+    const chip = document.createElement('span');
+    const selected = (w.categoryIds || []).includes(cat.id);
+    chip.className = 'chip' + (selected ? ' selected' : '');
+    chip.textContent = cat.name;
+    chip.addEventListener('click', () => {
+      const ids = new Set(w.categoryIds || []);
+      if (ids.has(cat.id)) ids.delete(cat.id);
+      else ids.add(cat.id);
+      w.categoryIds = [...ids];
+      saveWords();
+      renderWordCategoryEditor(containerId, w, subId);
+      const subEl = document.getElementById(subId);
+      if (subEl) subEl.textContent = wordSubLabel(w);
+      renderStats();
+      renderFlashcard();
+    });
+    container.appendChild(chip);
   });
 }
 
@@ -1058,6 +1109,71 @@ function extractContentWordsKo(text) {
   return result;
 }
 
+// ---------- Gramer çözümleme (cümleyi kelime/parçacık parçalarına ayırma) ----------
+// Japonca'da kuromoji token'ları (yüzey + okunuş + tür) doğrudan gösterilir.
+// Korece'de gerçek bir analiz olmadığından her 어절 gövde+조사 olarak ikiye
+// ayrılır ve 조사'nın işlevi (özne/nesne/konu vb.) etiketlenir.
+
+const KO_PARTICLE_LABELS = {
+  '은': 'konu', '는': 'konu', '이': 'özne', '가': 'özne', '을': 'nesne', '를': 'nesne',
+  '에': 'yer/zaman', '에서': 'yer (eylem)', '에게': 'kime', '한테': 'kime',
+  '도': "de/da", '만': 'sadece', '의': 'iyelik', '와': 've/ile', '과': 've/ile',
+  '이랑': 've/ile', '하고': 've/ile', '까지': 'kadar', '부터': "-den beri",
+  '으로': 'yön/araç', '로': 'yön/araç',
+};
+
+function renderParseResultJa(container, text) {
+  const tokens = jaAnalyze(text);
+  if (!tokens) {
+    container.textContent = 'Analiz motoru henüz hazır değil, biraz bekleyip tekrar dene.';
+    return;
+  }
+  tokens.forEach((t) => {
+    if (t.pos === '記号') return;
+    const hira = (t.reading && typeof wanakana !== 'undefined') ? wanakana.toHiragana(t.reading) : '';
+    const showReading = hira && hira !== t.surface;
+    const card = document.createElement('span');
+    card.className = 'parse-token';
+    card.innerHTML = `<span class="parse-surface">${showReading ? `<ruby>${escapeHtml(t.surface)}<rt>${escapeHtml(hira)}</rt></ruby>` : escapeHtml(t.surface)}</span>`
+      + `<span class="parse-pos">${escapeHtml(JA_POS_LABELS[effectivePos(t)] || t.pos)}</span>`;
+    container.appendChild(card);
+  });
+}
+
+function renderParseResultKo(container, text) {
+  const chunks = text.split(/\s+/).filter(Boolean);
+  chunks.forEach((rawChunk) => {
+    const trailingPunct = (rawChunk.match(/[.,!?~…]+$/) || [''])[0];
+    const chunk = trailingPunct ? rawChunk.slice(0, -trailingPunct.length) : rawChunk;
+    if (!chunk) return;
+    let stem = chunk;
+    let particle = '';
+    for (const suf of KO_PARTICLE_SUFFIXES) {
+      if (stem.length > suf.length && stem.endsWith(suf)) { particle = suf; stem = stem.slice(0, -suf.length); break; }
+    }
+    const stemCard = document.createElement('span');
+    stemCard.className = 'parse-token';
+    stemCard.innerHTML = `<span class="parse-surface">${escapeHtml(stem)}</span><span class="parse-pos">kelime</span>`;
+    container.appendChild(stemCard);
+    if (particle) {
+      const pCard = document.createElement('span');
+      pCard.className = 'parse-token parse-particle';
+      pCard.innerHTML = `<span class="parse-surface">${escapeHtml(particle)}</span><span class="parse-pos">${escapeHtml(KO_PARTICLE_LABELS[particle] || 'ek')}</span>`;
+      container.appendChild(pCard);
+    }
+  });
+}
+
+function renderParseResult(containerId, text) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.hidden = false;
+  container.innerHTML = '';
+  if (currentLang === 'ko') renderParseResultKo(container, text);
+  else renderParseResultJa(container, text);
+  if (!container.children.length && !container.textContent) container.textContent = 'Çözümlenecek bir şey yok.';
+}
+
 function getMissingWordsForSentence(text) {
   const candidates = currentLang === 'ko' ? extractContentWordsKo(text) : extractContentWordsJa(text);
   const existing = new Set(words.map((w) => normalize(w.text)));
@@ -1113,11 +1229,13 @@ function renderSentenceList() {
     const grammarResultId = `sent-grammar-${s.id}`;
     const translationId = `sent-translate-${s.id}`;
     const missingWordsId = `sent-missing-${s.id}`;
+    const parseResultId = `sent-parse-${s.id}`;
     const main = document.createElement('div');
     main.className = 'item-main';
     main.innerHTML = `<div class="item-title">${displayHtml(s.text)}</div>
       <div class="translation-result" id="${translationId}" ${s.translation ? '' : 'hidden'}>${s.translation ? escapeHtml(s.translation) : ''}</div>
       <div class="grammar-result" id="${grammarResultId}" hidden></div>
+      <div class="parse-result" id="${parseResultId}" hidden></div>
       <div class="chips missing-words" id="${missingWordsId}"></div>`;
 
     const btnWrap = document.createElement('div');
@@ -1148,6 +1266,17 @@ function renderSentenceList() {
     // document.getElementById burada çalışmaz — main içinde arıyoruz.
     setupTranslateButton(translateBtn, main.querySelector(`#${translationId}`), s, saveSentences);
 
+    const parseBtn = document.createElement('button');
+    parseBtn.className = 'kanji-btn';
+    parseBtn.style.padding = '4px 8px';
+    parseBtn.style.fontSize = '12px';
+    parseBtn.textContent = 'Çözümle';
+    parseBtn.addEventListener('click', () => {
+      const el = main.querySelector(`#${parseResultId}`);
+      if (!el.hidden) { el.hidden = true; return; }
+      renderParseResult(parseResultId, s.text);
+    });
+
     const delBtn = document.createElement('button');
     delBtn.className = 'del-btn';
     delBtn.textContent = 'Sil';
@@ -1160,6 +1289,7 @@ function renderSentenceList() {
     });
 
     if (currentLang === 'ja') btnWrap.appendChild(grammarBtn);
+    btnWrap.appendChild(parseBtn);
     btnWrap.appendChild(translateBtn);
     btnWrap.appendChild(makeSpeakButton(s.text, speakLangCode()));
     btnWrap.appendChild(delBtn);
@@ -1266,10 +1396,13 @@ function runGenerate() {
   const resultBox = document.getElementById('gen-result');
   const resultText = document.getElementById('gen-result-text');
   const grammarBox = document.getElementById('gen-grammar-result');
+  const parseBox = document.getElementById('gen-parse-result');
   const emptyEl = document.getElementById('gen-empty');
 
   grammarBox.hidden = true;
   grammarBox.textContent = '';
+  parseBox.hidden = true;
+  parseBox.textContent = '';
 
   const outcome = cfg.generate({
     grammarLevel: state.grammarLevel,
@@ -1312,6 +1445,12 @@ function setupGeneratorTab() {
   document.getElementById('gen-speak-btn').addEventListener('click', () => {
     const resultBox = document.getElementById('gen-result');
     speak(resultBox.dataset.text, resultBox.dataset.lang === 'ko' ? 'ko-KR' : 'ja-JP');
+  });
+  document.getElementById('gen-parse-btn').addEventListener('click', () => {
+    const resultBox = document.getElementById('gen-result');
+    const el = document.getElementById('gen-parse-result');
+    if (!el.hidden) { el.hidden = true; return; }
+    renderParseResult('gen-parse-result', resultBox.dataset.text);
   });
   document.getElementById('gen-generate-btn').addEventListener('click', runGenerate);
   document.getElementById('gen-regenerate-btn').addEventListener('click', runGenerate);
