@@ -433,7 +433,7 @@ function setupKanjiButton(btnId, inputId, candidatesId) {
 // paketleyip vendor/ja-grammar-check.js olarak ekledik — tamamen offline
 // çalışır, kuromoji'nin zaten indirdiği sözlüğü paylaşır.
 
-async function runGrammarCheck(text) {
+async function runGrammarCheckJa(text) {
   if (typeof window.jaGrammarChecker === 'undefined') {
     return { error: 'Gramer kontrol kütüphanesi yüklenemedi.' };
   }
@@ -444,6 +444,57 @@ async function runGrammarCheck(text) {
     console.error('Gramer kontrolü başarısız:', e);
     return { error: 'Gramer kontrolü sırasında bir hata oluştu.' };
   }
+}
+
+// Korece için hazır, tarayıcıda çalışan bir gramer/üslup kontrol kütüphanesi
+// yok (Japonca'daki ja-grammar-check.js'in dengi). Bu yüzden basit ama
+// gerçekten işe yarayan birkaç kural elle uygulanıyor: tekrarlanan kelime
+// (yazım hatası), noktalama önünde boşluk, çift boşluk, aynı metinde hem
+// 합니다체 hem 해요체 karışık kullanımı, çok uzun cümleler.
+function koGrammarCheck(text) {
+  const messages = [];
+
+  // NOT: \b (kelime sınırı) Hangıl karakterlerini "kelime karakteri" saymaz,
+  // bu yüzden regex yerine boşluğa göre bölüp bitişik aynı kelimeleri
+  // karşılaştırıyoruz.
+  const wordTokens = text.trim().split(/\s+/);
+  for (let i = 1; i < wordTokens.length; i++) {
+    if (wordTokens[i] && wordTokens[i] === wordTokens[i - 1]) {
+      messages.push({ message: `"${wordTokens[i]}" kelimesi art arda tekrarlanmış — yazım hatası olabilir.`, ruleId: 'tekrar-kelime' });
+      break;
+    }
+  }
+
+  if (/\s+[.,!?]/.test(text)) {
+    messages.push({ message: 'Noktalama işaretinden önce boşluk olmamalı.', ruleId: 'noktalama-boşluk' });
+  }
+
+  if (/ {2,}/.test(text)) {
+    messages.push({ message: 'Kelimeler arasında çift boşluk var.', ruleId: 'çift-boşluk' });
+  }
+
+  const hasHapsyo = /(습니다|ㅂ니다|습니까|ㅂ니까)[.!?]?/.test(text);
+  const hasHaeyo = /(아요|어요|여요|예요|이에요|해요)[.!?]?/.test(text);
+  if (hasHapsyo && hasHaeyo) {
+    messages.push({ message: 'Aynı metinde hem 합니다체 hem 해요체 karışık kullanılmış gibi görünüyor — kibarlık seviyesini tutarlı tut.', ruleId: 'karışık-kibarlık' });
+  }
+
+  text.split(/(?<=[.!?])\s+/).forEach((sentence) => {
+    if (sentence.trim().length > 60) {
+      messages.push({ message: `Bir cümle oldukça uzun (${sentence.trim().length} karakter) — okunabilirlik için bölmeyi düşün: "${sentence.trim().slice(0, 30)}..."`, ruleId: 'uzun-cümle' });
+    }
+  });
+
+  if (!/[.!?]$/.test(text.trim())) {
+    messages.push({ message: 'Cümle noktalama işaretiyle bitmiyor.', ruleId: 'noktalama-eksik' });
+  }
+
+  return { messages };
+}
+
+async function runGrammarCheck(text) {
+  if (currentLang === 'ko') return koGrammarCheck(text);
+  return runGrammarCheckJa(text);
 }
 
 function renderGrammarResult(container, outcome) {
@@ -504,16 +555,17 @@ function categoryNames(ids) {
 // ayrı satırda değil, kelimenin altında furigana olarak gösteriliyor.
 function wordSubLabel(w) {
   const catPart = categoryNames(w.categoryIds);
+  const meaningPart = w.meaning ? ` · "${w.meaning}"` : '';
 
-  if (w.type) return `${catPart} · Tür: ${w.type}`;
+  if (w.type) return `${catPart} · Tür: ${w.type}${meaningPart}`;
   if (currentLang === 'ko') {
     const pos = koTypeGroup(w.text);
-    return pos ? `${catPart} · Tür: ${pos}` : catPart;
+    return (pos ? `${catPart} · Tür: ${pos}` : catPart) + meaningPart;
   }
-  if (!jaTokenizer) return `${catPart} · Tür: analiz bekleniyor...`;
+  if (!jaTokenizer) return `${catPart} · Tür: analiz bekleniyor...${meaningPart}`;
 
   const pos = jaPosLabel(w.text);
-  return pos ? `${catPart} · Tür: ${pos}` : catPart;
+  return (pos ? `${catPart} · Tür: ${pos}` : catPart) + meaningPart;
 }
 
 // Kanji içeren metni, her kanji bölümünün altında küçük hiragana okunuşuyla
@@ -1019,6 +1071,25 @@ function renderWordCategoryEditor(containerId, w, subId) {
   });
 }
 
+// Yeni bir kelimeyi ekleyip Türkçe anlamını cümle çevirisiyle aynı yöntemle
+// (Google'ın anahtarsız uç noktası) otomatik olarak getirir. Çeviri asenkron
+// geldiğinden kelime önce anlamsız eklenir, gelince güncellenip yeniden
+// çizilir — kullanıcı eklerken beklemek zorunda kalmaz.
+function addWordEntry(text, extra) {
+  const word = { id: makeId(), text, categoryIds: [], type: null, ...extra };
+  words.push(word);
+  saveWords();
+  translateText(text, currentLang).then((meaning) => {
+    if (!meaning) return;
+    word.meaning = meaning;
+    saveWords();
+    renderWordList();
+    renderStats();
+    renderFlashcard();
+  });
+  return word;
+}
+
 function setupWordsTab() {
   document.getElementById('word-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1026,8 +1097,7 @@ function setupWordsTab() {
     const text = input.value.trim();
     if (!text) return;
 
-    words.push({ id: makeId(), text, categoryIds: [...newWordCategoryIds], type: newWordType });
-    saveWords();
+    addWordEntry(text, { categoryIds: [...newWordCategoryIds], type: newWordType });
     input.value = '';
     newWordCategoryIds.clear();
     newWordType = null;
@@ -1198,8 +1268,7 @@ function renderMissingWordChips(containerId, text) {
     chip.textContent = `+ ${word}`;
     chip.title = 'Kelime defterine ekle';
     chip.addEventListener('click', () => {
-      words.push({ id: makeId(), text: word, categoryIds: [], type: null });
-      saveWords();
+      addWordEntry(word);
       renderNewWordChips();
       renderWordList();
       renderStats();
@@ -1288,7 +1357,7 @@ function renderSentenceList() {
       renderFlashcard();
     });
 
-    if (currentLang === 'ja') btnWrap.appendChild(grammarBtn);
+    btnWrap.appendChild(grammarBtn);
     btnWrap.appendChild(parseBtn);
     btnWrap.appendChild(translateBtn);
     btnWrap.appendChild(makeSpeakButton(s.text, speakLangCode()));
@@ -1433,7 +1502,7 @@ function runGenerate() {
     });
   }
 
-  if (currentLang === 'ja' && typeof window.jaGrammarChecker !== 'undefined') {
+  if (currentLang === 'ko' || typeof window.jaGrammarChecker !== 'undefined') {
     runGrammarCheck(outcome.text).then((res) => renderGrammarResult(grammarBox, res));
   }
 }
@@ -1527,6 +1596,7 @@ function renderFlashcard() {
   };
 
   document.getElementById('flashcard-back-word').innerHTML = displayHtml(word.text);
+  document.getElementById('flashcard-back-meaning').textContent = word.meaning || '';
 
   const type = wordType(word);
   document.getElementById('flashcard-back-type').textContent = type ? `Tür: ${type}` : '';
@@ -1769,9 +1839,10 @@ function applyLangSpecificUi() {
     seedBtn.hidden = !isJa;
   }
 
-  // Japonca'ya özgü: kanji dönüştürme (Google girdi aracı) ve offline gramer
-  // kontrolü (ja-grammar-check.js) — Korece için eşdeğerleri yok.
-  ['word-kanji-btn', 'sentence-kanji-btn', 'sentence-grammar-btn'].forEach((id) => {
+  // Kanji dönüştürme (Google girdi aracı) sadece Japonca'ya özgü — Korece
+  // için eşdeğeri yok. Gramer kontrolü artık her iki dilde de çalışıyor
+  // (Korece'de kuralı tabanlı, bkz. koGrammarCheck).
+  ['word-kanji-btn', 'sentence-kanji-btn'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.hidden = !isJa;
   });

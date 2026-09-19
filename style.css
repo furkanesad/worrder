@@ -536,6 +536,13 @@ button:hover {
   color: #666;
 }
 
+.flashcard-meaning {
+  font-size: 16px;
+  color: #3478f6;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
 .flashcard-example-label {
   font-size: 11px;
   color: #999;
