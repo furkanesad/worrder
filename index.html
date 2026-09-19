@@ -9,6 +9,10 @@
 <body>
   <header>
     <h1>Kelime Defterim</h1>
+    <div class="lang-switch">
+      <button type="button" class="lang-btn active" data-lang="ja">🇯🇵 Japonca</button>
+      <button type="button" class="lang-btn" data-lang="ko">🇰🇷 Korece</button>
+    </div>
     <p id="lang-status" class="lang-status" hidden></p>
     <nav class="tabs">
       <button class="tab-btn active" data-tab="words">Kelimeler</button>
@@ -88,7 +92,10 @@
       </div>
 
       <div id="gen-result" class="generated-sentence" hidden>
-        <div id="gen-result-text" class="item-title"></div>
+        <div class="row" style="align-items:center;">
+          <div id="gen-result-text" class="item-title" style="flex:1;"></div>
+          <button type="button" id="gen-speak-btn" class="speak-btn">🔊</button>
+        </div>
         <div id="gen-grammar-result" class="grammar-result" hidden></div>
         <div class="row">
           <button type="button" id="gen-add-btn">Cümle Kütüphanesine Ekle</button>
@@ -131,6 +138,7 @@
         <div class="flashcard-inner">
           <div class="flashcard-face flashcard-front">
             <div id="flashcard-front-word" class="flashcard-word"></div>
+            <button type="button" id="flashcard-speak-btn" class="speak-btn">🔊</button>
             <div class="flashcard-hint">Çevirmek için dokun</div>
           </div>
           <div class="flashcard-face flashcard-back">
@@ -162,6 +170,9 @@
   <script src="vendor/ja-grammar-check.js"></script>
   <script src="generator-vocab.js"></script>
   <script src="generator.js"></script>
+  <script src="ko-hangul.js"></script>
+  <script src="ko-vocab.js"></script>
+  <script src="ko-generator.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

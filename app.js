@@ -1,5 +1,11 @@
 // Kelime Defterim - tamamen tarayıcıda çalışan, localStorage tabanlı Japonca kelime defteri.
 
+// Aktif dil ('ja' = Japonca, 'ko' = Korece). Kelimeler/Cümleler/Cümle Üret/
+// İstatistik/Flash Kart sekmeleri aynı arayüzü kullanır, sadece hangi
+// verinin (ve hangi dile özgü özelliklerin — furigana, kanji dönüştürme,
+// gramer kontrolü sadece Japonca'da var) aktif olduğu buna göre değişir.
+let currentLang = 'ja';
+
 let categories = [];
 let words = [];
 let sentences = [];
@@ -22,39 +28,45 @@ let searchQuery = '';
 
 // Uygulama ilk açıldığında (hiç kategori yoksa) hazır gelen varsayılan
 // kategoriler — kelimeleri kolayca gruplayıp filtreleyebilmek için.
-const DEFAULT_CATEGORIES = [
-  'Fiiller', 'İsimler', 'Sıfatlar', 'Zarflar', 'Parçacıklar',
-  'Zaman', 'Sayılar', 'Aile', 'Yiyecek-İçecek', 'Hayvanlar', 'Renkler', 'JLPT N5',
-];
+const DEFAULT_CATEGORIES = {
+  ja: ['Fiiller', 'İsimler', 'Sıfatlar', 'Zarflar', 'Parçacıklar',
+    'Zaman', 'Sayılar', 'Aile', 'Yiyecek-İçecek', 'Hayvanlar', 'Renkler', 'JLPT N5'],
+  ko: ['Fiiller', 'İsimler', 'Sıfatlar', 'Zarflar', 'Parçacıklar',
+    'Zaman', 'Sayılar', 'Aile', 'Yiyecek-İçecek', 'Hayvanlar', 'Renkler', 'TOPIK Temel'],
+};
 
 // "categories.length === 0" tek başına güvenilir bir "ilk kullanım" ölçütü
 // değil: kullanıcı sonradan bütün kategorilerini silerse tekrar tekrar
 // varsayılanlar geri gelirdi. Bu yüzden bir kereliğine çalıştığını ayrıca
-// localStorage'da işaretliyoruz.
+// localStorage'da (dile özel) işaretliyoruz.
 function ensureDefaultCategories() {
-  if (localStorage.getItem('kd_defaults_seeded')) return;
+  const seededKey = currentLang === 'ja' ? 'kd_defaults_seeded' : `kd_defaults_seeded_${currentLang}`;
+  if (localStorage.getItem(seededKey)) return;
   if (categories.length === 0) {
-    DEFAULT_CATEGORIES.forEach((name) => addCategoryByName(name));
+    (DEFAULT_CATEGORIES[currentLang] || DEFAULT_CATEGORIES.ja).forEach((name) => addCategoryByName(name));
   }
-  localStorage.setItem('kd_defaults_seeded', '1');
+  localStorage.setItem(seededKey, '1');
 }
 
 // ---------- Depolama ----------
 
-const STORAGE_KEYS = {
-  categories: 'kd_categories',
-  words: 'kd_words',
-  sentences: 'kd_sentences',
-};
+// Japonca veriler geriye dönük uyumluluk için eksiz (suffix'siz) anahtarlarda
+// kalıyor (uygulama uzun süre tek dilliydi); Korece gibi sonradan eklenen
+// diller "_<dil>" ekli kendi anahtarlarını kullanıyor.
+function storageKeys(lang) {
+  if (lang === 'ja') return { categories: 'kd_categories', words: 'kd_words', sentences: 'kd_sentences' };
+  return { categories: `kd_categories_${lang}`, words: `kd_words_${lang}`, sentences: `kd_sentences_${lang}` };
+}
 
 // Uygulamanın önceki (çift dilli) sürümü Japonca verisini "_ja" ekli
 // anahtarlarda tutuyordu. Var olan kelimeler kaybolmasın diye bir
 // kereliğine düz anahtarlara taşıyoruz.
 function migrateFromLangScopedStorage() {
+  const jaKeys = storageKeys('ja');
   const pairs = [
-    ['kd_categories_ja', STORAGE_KEYS.categories],
-    ['kd_words_ja', STORAGE_KEYS.words],
-    ['kd_sentences_ja', STORAGE_KEYS.sentences],
+    ['kd_categories_ja', jaKeys.categories],
+    ['kd_words_ja', jaKeys.words],
+    ['kd_sentences_ja', jaKeys.sentences],
   ];
   pairs.forEach(([oldKey, newKey]) => {
     if (localStorage.getItem(newKey) === null && localStorage.getItem(oldKey) !== null) {
@@ -64,9 +76,10 @@ function migrateFromLangScopedStorage() {
 }
 
 function loadAll() {
-  categories = readJSON(STORAGE_KEYS.categories, []);
-  words = readJSON(STORAGE_KEYS.words, []);
-  sentences = readJSON(STORAGE_KEYS.sentences, []);
+  const keys = storageKeys(currentLang);
+  categories = readJSON(keys.categories, []);
+  words = readJSON(keys.words, []);
+  sentences = readJSON(keys.sentences, []);
 
   // Eski veri biçimiyle (tek categoryId) uyumluluk: categoryIds dizisine çevir.
   words = words.map((w) => {
@@ -85,15 +98,15 @@ function readJSON(key, fallback) {
 }
 
 function saveCategories() {
-  localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(categories));
+  localStorage.setItem(storageKeys(currentLang).categories, JSON.stringify(categories));
 }
 
 function saveWords() {
-  localStorage.setItem(STORAGE_KEYS.words, JSON.stringify(words));
+  localStorage.setItem(storageKeys(currentLang).words, JSON.stringify(words));
 }
 
 function saveSentences() {
-  localStorage.setItem(STORAGE_KEYS.sentences, JSON.stringify(sentences));
+  localStorage.setItem(storageKeys(currentLang).sentences, JSON.stringify(sentences));
 }
 
 function makeId() {
@@ -190,7 +203,11 @@ function ensureJaTokenizer(callback) {
 }
 
 function jaAnalyze(text) {
-  if (!jaTokenizer || !text) return null;
+  // Tek nokta koruması: currentLang 'ko' iken kuromoji (Japonca sözlük)
+  // yanlışlıkla Korece metne uygulanmasın — bu fonksiyonu kullanan her yer
+  // (furigana, arama, tür algılama, örnek cümle eşleştirme...) otomatik
+  // olarak korunmuş olur.
+  if (currentLang !== 'ja' || !jaTokenizer || !text) return null;
   if (jaAnalysisCache.has(text)) return jaAnalysisCache.get(text);
   const tokens = jaTokenizer.tokenize(text).map((t) => ({
     surface: t.surface_form,
@@ -225,6 +242,12 @@ function matchSequenceCount(targetTokens, textTokens) {
 }
 
 function countWordInText(word, text) {
+  if (currentLang === 'ko') {
+    // Korece için morfolojik analiz yok; Hangıl zaten fonetik olduğundan
+    // basit alt-dize eşleşmesi yeterince iyi bir yaklaşım.
+    if (!word) return 0;
+    return text.split(word).length - 1;
+  }
   const wTokens = jaAnalyze(word);
   const tTokens = jaAnalyze(text);
   if (!wTokens || !tTokens) return 0;
@@ -261,10 +284,23 @@ function jaTypeGroup(text) {
   return JA_TYPE_FILTER_GROUPS[effectivePos(main)] || null;
 }
 
+// Korece için kuromoji gibi bir morfolojik analizör yok; basit son-ek
+// sezgileriyle kaba bir tahmin yapılıyor (kesin değil — kullanıcı türü
+// elle de seçebilir).
+function koTypeGroup(text) {
+  if (/(다)$/.test(text)) return 'Fiil';
+  if (/(에서|에게|께서|이에요|예요|은|는|이|가|을|를|도|만|와|과)$/.test(text)) return 'Parçacık';
+  return 'İsim';
+}
+
+function autoTypeGroup(text) {
+  return currentLang === 'ko' ? koTypeGroup(text) : jaTypeGroup(text);
+}
+
 // Bir kelimenin türü: kelime eklenirken elle seçildiyse onu, yoksa
-// kuromoji'nin otomatik algıladığı türü kullanır.
+// dile göre otomatik algılanan türü kullanır.
 function wordType(w) {
-  return w.type || jaTypeGroup(w.text);
+  return w.type || autoTypeGroup(w.text);
 }
 
 function jaReadingHiragana(text) {
@@ -418,6 +454,10 @@ function wordSubLabel(w) {
   const catPart = categoryNames(w.categoryIds);
 
   if (w.type) return `${catPart} · Tür: ${w.type}`;
+  if (currentLang === 'ko') {
+    const pos = koTypeGroup(w.text);
+    return pos ? `${catPart} · Tür: ${pos}` : catPart;
+  }
   if (!jaTokenizer) return `${catPart} · Tür: analiz bekleniyor...`;
 
   const pos = jaPosLabel(w.text);
@@ -426,7 +466,14 @@ function wordSubLabel(w) {
 
 // Kanji içeren metni, her kanji bölümünün altında küçük hiragana okunuşuyla
 // (furigana) birlikte <ruby> olarak render eder. Kanji olmayan kısımlar
-// (zaten hiragana/katakana, noktalama vb.) olduğu gibi bırakılır.
+// (zaten hiragana/katakana, noktalama vb.) olduğu gibi bırakılır. Korece
+// zaten tamamen fonetik (Hangıl) olduğu için furigana benzeri bir okunuş
+// gösterimine ihtiyaç yok — metin olduğu gibi gösterilir.
+function displayHtml(text) {
+  if (currentLang === 'ko') return escapeHtml(text);
+  return furiganaHtml(text);
+}
+
 function furiganaHtml(text) {
   const tokens = jaAnalyze(text);
   if (!tokens) return escapeHtml(text);
@@ -441,15 +488,49 @@ function furiganaHtml(text) {
   }).join('');
 }
 
+// ---------- Sesli okuma (Web Speech API — tamamen çevrimdışı, tarayıcının
+// kendi ses motorunu kullanır, internet veya API anahtarı gerekmez) ----------
+
+function speakLangCode() {
+  return currentLang === 'ko' ? 'ko-KR' : 'ja-JP';
+}
+
+function speak(text, lang) {
+  if (!text || !('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = lang;
+  speechSynthesis.speak(utter);
+}
+
+function makeSpeakButton(text, lang) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'speak-btn';
+  btn.title = 'Sesli oku';
+  btn.textContent = '🔊';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    speak(text, lang);
+  });
+  return btn;
+}
+
 // ---------- Kana IME (WanaKana) ----------
+// Sadece Japonca'da anlamlı (romaji yazarken otomatik hiragana/katakana'ya
+// çevirir); Korece'de kullanıcı işletim sisteminin kendi Korece klavyesini
+// kullanır, bu yüzden dil değişince bind/unbind ediliyor.
+
+const IME_INPUT_IDS = ['word-input', 'sentence-input', 'word-search', 'stats-search', 'flashcard-search'];
 
 function applyImeBinding() {
   if (typeof wanakana === 'undefined') return;
-  wanakana.bind(document.getElementById('word-input'));
-  wanakana.bind(document.getElementById('sentence-input'));
-  wanakana.bind(document.getElementById('word-search'));
-  wanakana.bind(document.getElementById('stats-search'));
-  wanakana.bind(document.getElementById('flashcard-search'));
+  IME_INPUT_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (currentLang === 'ja') wanakana.bind(el);
+    else wanakana.unbind(el);
+  });
 }
 
 // window.confirm() bazı görüntüleme ortamlarında (gömülü webview vb.)
@@ -770,7 +851,7 @@ function getFilteredWords() {
 
   if (filterTypes.size > 0) {
     filtered = filtered.filter((w) => {
-      const t = w.type || (jaTokenizer ? jaTypeGroup(w.text) : null);
+      const t = w.type || (currentLang === 'ko' || jaTokenizer ? autoTypeGroup(w.text) : null);
       return t && filterTypes.has(t);
     });
   }
@@ -804,8 +885,11 @@ function renderWordList() {
 
     const main = document.createElement('div');
     main.className = 'item-main';
-    main.innerHTML = `<div class="item-title">${furiganaHtml(w.text)}</div>
+    main.innerHTML = `<div class="item-title">${displayHtml(w.text)}</div>
       <div class="item-sub">${escapeHtml(wordSubLabel(w))}</div>`;
+
+    const btnWrap = document.createElement('div');
+    btnWrap.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
 
     const delBtn = document.createElement('button');
     delBtn.className = 'del-btn';
@@ -818,8 +902,11 @@ function renderWordList() {
       renderFlashcard();
     });
 
+    btnWrap.appendChild(makeSpeakButton(w.text, speakLangCode()));
+    btnWrap.appendChild(delBtn);
+
     li.appendChild(main);
-    li.appendChild(delBtn);
+    li.appendChild(btnWrap);
     list.appendChild(li);
   });
 }
@@ -893,7 +980,7 @@ function renderSentenceList() {
     const grammarResultId = `sent-grammar-${s.id}`;
     const main = document.createElement('div');
     main.className = 'item-main';
-    main.innerHTML = `<div class="item-title">${furiganaHtml(s.text)}</div>
+    main.innerHTML = `<div class="item-title">${displayHtml(s.text)}</div>
       <div class="grammar-result" id="${grammarResultId}" hidden></div>`;
 
     const btnWrap = document.createElement('div');
@@ -926,7 +1013,8 @@ function renderSentenceList() {
       renderFlashcard();
     });
 
-    btnWrap.appendChild(grammarBtn);
+    if (currentLang === 'ja') btnWrap.appendChild(grammarBtn);
+    btnWrap.appendChild(makeSpeakButton(s.text, speakLangCode()));
     btnWrap.appendChild(delBtn);
 
     li.appendChild(main);
@@ -963,14 +1051,27 @@ function setupSentencesTab() {
 // tabanlı). Burada sadece seçim arayüzü (chip'ler) ve sonucu Cümleler
 // kütüphanesine ekleme akışı var.
 
-const genState = {
-  grammarLevel: 'N5',
-  length: 'short',
-  vocabLevel: 'N5',
-  useOwnWords: false,
+// Cümle Üret sekmesi her iki dil için de aynı arayüzü kullanır; hangi
+// motorun (Japonca generator.js / Korece ko-generator.js) ve hangi seviye
+// setinin aktif olduğu currentLang'e göre belirlenir.
+const GEN_LANG_CONFIG = {
+  ja: {
+    levelOrder: GEN_LEVEL_ORDER,
+    levelLabels: { N5: 'N5 (Temel)', N4: 'N4 (Temel-Orta)', N3: 'N3 (Orta)' },
+    generate: (opts) => generateSentence(opts),
+  },
+  ko: {
+    levelOrder: GEN_KO_LEVEL_ORDER,
+    levelLabels: { 초급: '초급 (Temel)', 중급: '중급 (Orta)', 고급: '고급 (İleri)' },
+    generate: (opts) => generateKoreanSentence(opts),
+  },
 };
 
-const GEN_LEVEL_LABELS = { N5: 'N5 (Temel)', N4: 'N4 (Temel-Orta)', N3: 'N3 (Orta)' };
+const genState = {
+  ja: { grammarLevel: 'N5', length: 'short', vocabLevel: 'N5', useOwnWords: false },
+  ko: { grammarLevel: '초급', length: 'short', vocabLevel: '초급', useOwnWords: false },
+};
+
 const GEN_LENGTH_LABELS = { short: 'Kısa', medium: 'Orta', long: 'Uzun' };
 
 function renderGenChipGroup(containerId, options, labels, current, onSelect) {
@@ -986,21 +1087,33 @@ function renderGenChipGroup(containerId, options, labels, current, onSelect) {
 }
 
 function renderGenChips() {
-  renderGenChipGroup('gen-grammar-chips', GEN_LEVEL_ORDER, GEN_LEVEL_LABELS, genState.grammarLevel, (key) => {
-    genState.grammarLevel = key;
+  const cfg = GEN_LANG_CONFIG[currentLang];
+  const state = genState[currentLang];
+
+  renderGenChipGroup('gen-grammar-chips', cfg.levelOrder, cfg.levelLabels, state.grammarLevel, (key) => {
+    state.grammarLevel = key;
     renderGenChips();
   });
-  renderGenChipGroup('gen-length-chips', GEN_LENGTH_ORDER, GEN_LENGTH_LABELS, genState.length, (key) => {
-    genState.length = key;
+  renderGenChipGroup('gen-length-chips', GEN_LENGTH_ORDER, GEN_LENGTH_LABELS, state.length, (key) => {
+    state.length = key;
     renderGenChips();
   });
-  renderGenChipGroup('gen-vocab-chips', GEN_LEVEL_ORDER, GEN_LEVEL_LABELS, genState.vocabLevel, (key) => {
-    genState.vocabLevel = key;
+  renderGenChipGroup('gen-vocab-chips', cfg.levelOrder, cfg.levelLabels, state.vocabLevel, (key) => {
+    state.vocabLevel = key;
     renderGenChips();
   });
+  const ownToggle = document.getElementById('gen-use-own-words');
+  if (ownToggle) ownToggle.checked = state.useOwnWords;
+
+  const resultBox = document.getElementById('gen-result');
+  if (resultBox) resultBox.hidden = true;
+  const emptyEl = document.getElementById('gen-empty');
+  if (emptyEl) emptyEl.textContent = '';
 }
 
 function runGenerate() {
+  const cfg = GEN_LANG_CONFIG[currentLang];
+  const state = genState[currentLang];
   const resultBox = document.getElementById('gen-result');
   const resultText = document.getElementById('gen-result-text');
   const grammarBox = document.getElementById('gen-grammar-result');
@@ -1009,11 +1122,11 @@ function runGenerate() {
   grammarBox.hidden = true;
   grammarBox.textContent = '';
 
-  const outcome = generateSentence({
-    grammarLevel: genState.grammarLevel,
-    length: genState.length,
-    vocabLevel: genState.vocabLevel,
-    useOwnWords: genState.useOwnWords,
+  const outcome = cfg.generate({
+    grammarLevel: state.grammarLevel,
+    length: state.length,
+    vocabLevel: state.vocabLevel,
+    useOwnWords: state.useOwnWords,
     ownWords: words,
   });
 
@@ -1027,18 +1140,23 @@ function runGenerate() {
   emptyEl.hidden = true;
   resultBox.hidden = false;
   resultBox.dataset.text = outcome.text;
-  resultText.innerHTML = furiganaHtml(outcome.text);
+  resultBox.dataset.lang = currentLang;
+  resultText.innerHTML = displayHtml(outcome.text);
 
-  if (!jaTokenizer) ensureJaTokenizer(() => { resultText.innerHTML = furiganaHtml(resultBox.dataset.text); });
+  if (currentLang === 'ja' && !jaTokenizer) ensureJaTokenizer(() => { resultText.innerHTML = displayHtml(resultBox.dataset.text); });
 
-  if (typeof window.jaGrammarChecker !== 'undefined') {
+  if (currentLang === 'ja' && typeof window.jaGrammarChecker !== 'undefined') {
     runGrammarCheck(outcome.text).then((res) => renderGrammarResult(grammarBox, res));
   }
 }
 
 function setupGeneratorTab() {
   document.getElementById('gen-use-own-words').addEventListener('change', (e) => {
-    genState.useOwnWords = e.target.checked;
+    genState[currentLang].useOwnWords = e.target.checked;
+  });
+  document.getElementById('gen-speak-btn').addEventListener('click', () => {
+    const resultBox = document.getElementById('gen-result');
+    speak(resultBox.dataset.text, resultBox.dataset.lang === 'ko' ? 'ko-KR' : 'ja-JP');
   });
   document.getElementById('gen-generate-btn').addEventListener('click', runGenerate);
   document.getElementById('gen-regenerate-btn').addEventListener('click', runGenerate);
@@ -1076,7 +1194,7 @@ function renderFlashcard() {
   const counterEl = document.getElementById('flashcard-counter');
   if (!emptyEl || !cardEl || !counterEl) return;
 
-  if (!jaTokenizer) {
+  if (currentLang === 'ja' && !jaTokenizer) {
     ensureJaTokenizer();
     cardEl.hidden = true;
     counterEl.textContent = '';
@@ -1109,8 +1227,12 @@ function renderFlashcard() {
   counterEl.textContent = `${idx + 1} / ${deck.length}`;
 
   document.getElementById('flashcard-front-word').textContent = word.text;
+  document.getElementById('flashcard-speak-btn').onclick = (e) => {
+    e.stopPropagation();
+    speak(word.text, speakLangCode());
+  };
 
-  document.getElementById('flashcard-back-word').innerHTML = furiganaHtml(word.text);
+  document.getElementById('flashcard-back-word').innerHTML = displayHtml(word.text);
 
   const type = wordType(word);
   document.getElementById('flashcard-back-type').textContent = type ? `Tür: ${type}` : '';
@@ -1118,7 +1240,7 @@ function renderFlashcard() {
 
   const example = findExampleSentenceFor(word);
   document.getElementById('flashcard-back-example').innerHTML = example
-    ? furiganaHtml(example.text)
+    ? displayHtml(example.text)
     : '<span class="empty-text" style="padding:0;">Bu kelime için örnek cümle yok. Cümleler sekmesinden ekleyebilirsin.</span>';
 
   cardEl.classList.toggle('flipped', flashcardFlipped);
@@ -1166,7 +1288,7 @@ function renderStats() {
   const summary = document.getElementById('stats-summary');
   list.innerHTML = '';
 
-  if (!jaTokenizer) {
+  if (currentLang === 'ja' && !jaTokenizer) {
     ensureJaTokenizer();
     summary.textContent = 'Japonca analiz motoru hazırlanıyor...';
     list.innerHTML = '<li class="empty-text" style="border:none;">Lütfen bekleyin, sözlük yükleniyor (ilk seferde biraz sürebilir)...</li>';
@@ -1194,7 +1316,7 @@ function renderStats() {
 
     const main = document.createElement('div');
     main.className = 'item-main';
-    main.innerHTML = `<div class="item-title">${furiganaHtml(s.text)}</div>
+    main.innerHTML = `<div class="item-title">${displayHtml(s.text)}</div>
       <div class="item-sub">${escapeHtml(wordSubLabel(s))}</div>`;
 
     const badge = document.createElement('span');
@@ -1313,6 +1435,95 @@ function setupSeedButton() {
   document.getElementById('seed-data-btn').addEventListener('click', loadSeedData);
 }
 
+// ---------- Dil değiştirici ----------
+// Kelimeler/Cümleler/Cümle Üret/İstatistik/Flash Kart sekmeleri aynı arayüzü
+// paylaşır; dil değişince sadece hangi veri setinin (ve hangi dile özgü
+// özelliklerin — furigana, kanji dönüştürme, gramer kontrolü, kuromoji arama)
+// aktif olduğu değişir. Japonca'ya özgü butonlar/metinler Korece'de gizlenir.
+
+const LANG_UI_TEXT = {
+  ja: {
+    searchPlaceholder: 'Kanji, kana veya okunuş yaz...',
+    wordPlaceholder: 'Yeni kelime',
+    sentencePlaceholder: 'Yeni cümle yaz...',
+    seedBtn: 'Örnek 100 kelime + 20 cümle + 2 paragraf yükle',
+  },
+  ko: {
+    searchPlaceholder: 'Hangıl yaz...',
+    wordPlaceholder: 'Yeni kelime (Hangıl)',
+    sentencePlaceholder: 'Yeni cümle yaz...',
+    seedBtn: 'Örnek 100 kelime + 20 cümle yükle',
+  },
+};
+
+function applyLangSpecificUi() {
+  const t = LANG_UI_TEXT[currentLang];
+  const isJa = currentLang === 'ja';
+
+  ['word-search', 'stats-search', 'flashcard-search'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.placeholder = t.searchPlaceholder;
+  });
+  const wordInput = document.getElementById('word-input');
+  if (wordInput) wordInput.placeholder = t.wordPlaceholder;
+  const sentInput = document.getElementById('sentence-input');
+  if (sentInput) sentInput.placeholder = t.sentencePlaceholder;
+  const seedBtn = document.getElementById('seed-data-btn');
+  if (seedBtn) {
+    seedBtn.textContent = t.seedBtn;
+    // Örnek veri seti şu an sadece Japonca için hazır.
+    seedBtn.hidden = !isJa;
+  }
+
+  // Japonca'ya özgü: kanji dönüştürme (Google girdi aracı) ve offline gramer
+  // kontrolü (ja-grammar-check.js) — Korece için eşdeğerleri yok.
+  ['word-kanji-btn', 'sentence-kanji-btn', 'sentence-grammar-btn'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !isJa;
+  });
+
+  document.querySelectorAll('.lang-btn').forEach((b) => b.classList.toggle('active', b.dataset.lang === currentLang));
+
+  renderGenChips();
+}
+
+function switchLanguage(lang) {
+  if (lang === currentLang) return;
+  currentLang = lang;
+
+  loadAll();
+  ensureDefaultCategories();
+
+  filterCategoryIds = new Set();
+  filterNoCategory = false;
+  filterTypes = new Set();
+  newWordCategoryIds = new Set();
+  newWordType = null;
+  searchQuery = '';
+  ['word-search', 'stats-search', 'flashcard-search'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  flashcardCurrentId = null;
+  flashcardFlipped = false;
+
+  applyImeBinding();
+  applyLangSpecificUi();
+  renderNewWordChips();
+  renderNewWordTypeChips();
+  renderFilterChips();
+  renderTypeFilterChips();
+  refreshCurrentView();
+
+  if (lang === 'ja') ensureJaTokenizer();
+}
+
+function setupLangSwitch() {
+  document.querySelectorAll('.lang-btn').forEach((btn) => {
+    btn.addEventListener('click', () => switchLanguage(btn.dataset.lang));
+  });
+}
+
 // ---------- Yardımcı ----------
 
 function escapeHtml(str) {
@@ -1327,7 +1538,9 @@ migrateFromLangScopedStorage();
 loadAll();
 ensureDefaultCategories();
 setupTabs();
+setupLangSwitch();
 applyImeBinding();
+applyLangSpecificUi();
 setupWordsTab();
 setupSentencesTab();
 setupGeneratorTab();
