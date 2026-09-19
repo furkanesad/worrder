@@ -198,6 +198,7 @@ function jaAnalyze(text) {
     pos: t.pos,
     posDetail: (t.pos_detail_1 && t.pos_detail_1 !== '*') ? t.pos_detail_1 : null,
     reading: (t.reading && t.reading !== '*') ? t.reading : null,
+    conjugated_type: t.conjugated_type || null,
   }));
   jaAnalysisCache.set(text, tokens);
   return tokens;
@@ -934,22 +935,127 @@ function renderSentenceList() {
   });
 }
 
+// Hem manuel "Cümleyi Kaydet" formu hem de Cümle Üret sekmesindeki
+// "Kütüphaneye Ekle" butonu bu fonksiyonu kullanır.
+function addSentenceText(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return false;
+  sentences.push({ id: makeId(), text: trimmed });
+  saveSentences();
+  renderSentenceList();
+  renderStats();
+  renderFlashcard();
+  return true;
+}
+
 function setupSentencesTab() {
   document.getElementById('sentence-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const input = document.getElementById('sentence-input');
-    const text = input.value.trim();
-    if (!text) return;
-
-    sentences.push({ id: makeId(), text });
-    saveSentences();
-    input.value = '';
-    renderSentenceList();
-    renderStats();
-    renderFlashcard();
+    if (addSentenceText(input.value)) input.value = '';
   });
 
   renderSentenceList();
+}
+
+// ---------- Cümle Üret sekmesi ----------
+// Üretim mantığının tamamı generator.js'te (tamamen offline, kural/şablon
+// tabanlı). Burada sadece seçim arayüzü (chip'ler) ve sonucu Cümleler
+// kütüphanesine ekleme akışı var.
+
+const genState = {
+  grammarLevel: 'N5',
+  length: 'short',
+  vocabLevel: 'N5',
+  useOwnWords: false,
+};
+
+const GEN_LEVEL_LABELS = { N5: 'N5 (Temel)', N4: 'N4 (Temel-Orta)', N3: 'N3 (Orta)' };
+const GEN_LENGTH_LABELS = { short: 'Kısa', medium: 'Orta', long: 'Uzun' };
+
+function renderGenChipGroup(containerId, options, labels, current, onSelect) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  options.forEach((key) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (current === key ? ' selected' : '');
+    chip.textContent = labels[key];
+    chip.addEventListener('click', () => onSelect(key));
+    container.appendChild(chip);
+  });
+}
+
+function renderGenChips() {
+  renderGenChipGroup('gen-grammar-chips', GEN_LEVEL_ORDER, GEN_LEVEL_LABELS, genState.grammarLevel, (key) => {
+    genState.grammarLevel = key;
+    renderGenChips();
+  });
+  renderGenChipGroup('gen-length-chips', GEN_LENGTH_ORDER, GEN_LENGTH_LABELS, genState.length, (key) => {
+    genState.length = key;
+    renderGenChips();
+  });
+  renderGenChipGroup('gen-vocab-chips', GEN_LEVEL_ORDER, GEN_LEVEL_LABELS, genState.vocabLevel, (key) => {
+    genState.vocabLevel = key;
+    renderGenChips();
+  });
+}
+
+function runGenerate() {
+  const resultBox = document.getElementById('gen-result');
+  const resultText = document.getElementById('gen-result-text');
+  const grammarBox = document.getElementById('gen-grammar-result');
+  const emptyEl = document.getElementById('gen-empty');
+
+  grammarBox.hidden = true;
+  grammarBox.textContent = '';
+
+  const outcome = generateSentence({
+    grammarLevel: genState.grammarLevel,
+    length: genState.length,
+    vocabLevel: genState.vocabLevel,
+    useOwnWords: genState.useOwnWords,
+    ownWords: words,
+  });
+
+  if (outcome.error) {
+    resultBox.hidden = true;
+    emptyEl.hidden = false;
+    emptyEl.textContent = outcome.error;
+    return;
+  }
+
+  emptyEl.hidden = true;
+  resultBox.hidden = false;
+  resultBox.dataset.text = outcome.text;
+  resultText.innerHTML = furiganaHtml(outcome.text);
+
+  if (!jaTokenizer) ensureJaTokenizer(() => { resultText.innerHTML = furiganaHtml(resultBox.dataset.text); });
+
+  if (typeof window.jaGrammarChecker !== 'undefined') {
+    runGrammarCheck(outcome.text).then((res) => renderGrammarResult(grammarBox, res));
+  }
+}
+
+function setupGeneratorTab() {
+  document.getElementById('gen-use-own-words').addEventListener('change', (e) => {
+    genState.useOwnWords = e.target.checked;
+  });
+  document.getElementById('gen-generate-btn').addEventListener('click', runGenerate);
+  document.getElementById('gen-regenerate-btn').addEventListener('click', runGenerate);
+  document.getElementById('gen-add-btn').addEventListener('click', () => {
+    const resultBox = document.getElementById('gen-result');
+    if (!addSentenceText(resultBox.dataset.text)) return;
+    const btn = document.getElementById('gen-add-btn');
+    const original = btn.textContent;
+    btn.textContent = '✓ Kütüphaneye eklendi';
+    btn.disabled = true;
+    setTimeout(() => {
+      btn.textContent = original;
+      btn.disabled = false;
+    }, 1500);
+  });
+
+  renderGenChips();
 }
 
 // ---------- Flash Kart sekmesi ----------
@@ -1224,6 +1330,7 @@ setupTabs();
 applyImeBinding();
 setupWordsTab();
 setupSentencesTab();
+setupGeneratorTab();
 setupFlashcardsTab();
 setupKanjiButton('word-kanji-btn', 'word-input', 'word-kanji-candidates');
 setupKanjiButton('sentence-kanji-btn', 'sentence-input', 'sentence-kanji-candidates');

@@ -449,3 +449,32 @@ button:hover {
   flex: 1 1 auto;
   min-width: 90px;
 }
+
+.gen-note {
+  font-size: 13px;
+  color: #888;
+  margin: 0 0 4px;
+}
+
+.gen-own-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #333;
+  margin: 4px 0 12px;
+  cursor: pointer;
+}
+
+.generated-sentence {
+  margin-top: 12px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+}
+
+.generated-sentence .item-title {
+  font-size: 18px;
+  margin-bottom: 4px;
+}

@@ -13,6 +13,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab="words">Kelimeler</button>
       <button class="tab-btn" data-tab="sentences">Cümleler</button>
+      <button class="tab-btn" data-tab="generator">Cümle Üret</button>
       <button class="tab-btn" data-tab="stats">İstatistik</button>
       <button class="tab-btn" data-tab="flashcards">Flash Kart</button>
     </nav>
@@ -61,6 +62,40 @@
 
       <h2>Kayıtlı Cümleler (<span id="sentence-count">0</span>)</h2>
       <ul id="sentence-list" class="item-list"></ul>
+    </section>
+
+    <!-- CÜMLE ÜRET -->
+    <section id="tab-generator" class="tab-panel">
+      <h2>Otomatik Cümle Oluştur</h2>
+      <p class="gen-note">Tamamen çevrimdışı çalışır: JLPT seviyeli gramer kalıpları + kelime bankasını birleştirip cümle üretir.</p>
+
+      <h3>Gramer seviyesi</h3>
+      <div id="gen-grammar-chips" class="chips"></div>
+
+      <h3>Cümle uzunluğu</h3>
+      <div id="gen-length-chips" class="chips"></div>
+
+      <h3>Kelime seviyesi</h3>
+      <div id="gen-vocab-chips" class="chips"></div>
+
+      <label class="gen-own-toggle">
+        <input type="checkbox" id="gen-use-own-words">
+        Kendi kelime defterimdeki kelimeleri de kullan
+      </label>
+
+      <div class="row">
+        <button type="button" id="gen-generate-btn">Cümle Oluştur</button>
+      </div>
+
+      <div id="gen-result" class="generated-sentence" hidden>
+        <div id="gen-result-text" class="item-title"></div>
+        <div id="gen-grammar-result" class="grammar-result" hidden></div>
+        <div class="row">
+          <button type="button" id="gen-add-btn">Cümle Kütüphanesine Ekle</button>
+          <button type="button" id="gen-regenerate-btn">Başka Bir Tane</button>
+        </div>
+      </div>
+      <p id="gen-empty" class="empty-text"></p>
     </section>
 
     <!-- İSTATİSTİK -->
@@ -125,6 +160,7 @@
   <script src="vendor/kuromoji.js"></script>
   <script>window.kuromojin = { dicPath: 'vendor/dict/' };</script>
   <script src="vendor/ja-grammar-check.js"></script>
+  <script src="generator.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
