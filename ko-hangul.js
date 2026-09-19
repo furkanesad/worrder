@@ -218,3 +218,201 @@ function koIfConditional(entry) {
   }
   return stem + '으면';
 }
+
+// ---------- Latin harflerle yazarken anlık Hangıl'a çevirme (2-beolsik/두벌식) ----------
+// WanaKana'nın Japonca için yaptığının Korece karşılığı: standart Korece
+// klavye düzeninde her Latin tuşu belirli bir jamo'ya karşılık gelir (bu,
+// Kore işletim sistemlerindeki gerçek düzenin aynısıdır). Kullanıcı bu
+// düzeni bilmese de "annyeong" gibi yazarsam ne çıkar" sezgisiyle değil,
+// gerçek 두벌식 tuş eşlemesiyle çalışır — örn. "r"+"k" = ㄱ+ㅏ = "가".
+
+const KO_CONSONANT_KEYS = {
+  q: 'ㅂ', w: 'ㅈ', e: 'ㄷ', r: 'ㄱ', t: 'ㅅ',
+  a: 'ㅁ', s: 'ㄴ', d: 'ㅇ', f: 'ㄹ', g: 'ㅎ',
+  z: 'ㅋ', x: 'ㅌ', c: 'ㅊ', v: 'ㅍ',
+  Q: 'ㅃ', W: 'ㅉ', E: 'ㄸ', R: 'ㄲ', T: 'ㅆ',
+};
+
+const KO_VOWEL_KEYS = {
+  y: 'ㅛ', u: 'ㅕ', i: 'ㅑ', o: 'ㅐ', p: 'ㅔ',
+  h: 'ㅗ', j: 'ㅓ', k: 'ㅏ', l: 'ㅣ',
+  b: 'ㅠ', n: 'ㅜ', m: 'ㅡ',
+  O: 'ㅒ', P: 'ㅖ',
+};
+
+const KO_COMPOUND_JUNG = {
+  'ㅗㅏ': 'ㅘ', 'ㅗㅐ': 'ㅙ', 'ㅗㅣ': 'ㅚ',
+  'ㅜㅓ': 'ㅝ', 'ㅜㅔ': 'ㅞ', 'ㅜㅣ': 'ㅟ',
+  'ㅡㅣ': 'ㅢ',
+};
+
+const KO_COMPOUND_JONG = {
+  'ㄱㅅ': 'ㄳ', 'ㄴㅈ': 'ㄵ', 'ㄴㅎ': 'ㄶ', 'ㄹㄱ': 'ㄺ', 'ㄹㅁ': 'ㄻ',
+  'ㄹㅂ': 'ㄼ', 'ㄹㅅ': 'ㄽ', 'ㄹㅌ': 'ㄾ', 'ㄹㅍ': 'ㄿ', 'ㄹㅎ': 'ㅀ', 'ㅂㅅ': 'ㅄ',
+};
+
+// Bileşik bir 종성 bir sonraki hece için 초성'a taşınırken (bir ünlü
+// geldiğinde) hangi iki basit ünsüze ayrıldığını verir.
+const KO_JONG_SPLIT = {
+  'ㄳ': ['ㄱ', 'ㅅ'], 'ㄵ': ['ㄴ', 'ㅈ'], 'ㄶ': ['ㄴ', 'ㅎ'], 'ㄺ': ['ㄹ', 'ㄱ'], 'ㄻ': ['ㄹ', 'ㅁ'],
+  'ㄼ': ['ㄹ', 'ㅂ'], 'ㄽ': ['ㄹ', 'ㅅ'], 'ㄾ': ['ㄹ', 'ㅌ'], 'ㄿ': ['ㄹ', 'ㅍ'], 'ㅀ': ['ㄹ', 'ㅎ'], 'ㅄ': ['ㅂ', 'ㅅ'],
+};
+
+// 종성 olamayan (sadece 초성 olabilen) ünsüzler: 된소리 ㄸ/ㅃ/ㅉ.
+const KO_NO_JONG = new Set(['ㄸ', 'ㅃ', 'ㅉ']);
+
+// Tek bir jamo tuşunu mevcut (cho/jung/jong) durumuna uygular; o adımda
+// kesinleşen (commit edilen) metni döndürür (yoksa ''), tanınmayan bir tuşsa
+// null döner. Hem toplu dönüştürme (koRomanizeToHangul) hem de canlı yazarken
+// çalışan koImeBind aynı bu tek adımı kullanır — mantık tek yerde.
+function koAssembleStep(state, ch) {
+  const cJamo = KO_CONSONANT_KEYS[ch];
+  const vJamo = KO_VOWEL_KEYS[ch];
+  let flushed = '';
+
+  function doFlush() {
+    if (state.cho && state.jung) flushed += hangulCompose(state.cho, state.jung, state.jong || '');
+    else if (state.cho) flushed += state.cho;
+    else if (state.jung) flushed += state.jung;
+    state.cho = null; state.jung = null; state.jong = null;
+  }
+
+  if (cJamo) {
+    if (!state.cho && !state.jung) {
+      state.cho = cJamo;
+    } else if (!state.cho && state.jung) {
+      // 초성'sız bekleyen çıplak bir ünlü varken ünsüz gelirse (örn. "와"
+      // yazılırken ㅇ tuşu unutulmuşsa: ㅗㅏ sonra ㄱ) — bekleyen ünlü
+      // olduğu gibi yazılır, yeni ünsüz bir sonraki hecenin 초성'ı olur.
+      doFlush();
+      state.cho = cJamo;
+    } else if (state.cho && !state.jung) {
+      doFlush();
+      state.cho = cJamo;
+    } else if (!state.jong) {
+      if (KO_NO_JONG.has(cJamo)) { doFlush(); state.cho = cJamo; }
+      else state.jong = cJamo;
+    } else {
+      const compound = KO_COMPOUND_JONG[state.jong + cJamo];
+      if (compound) state.jong = compound;
+      else { doFlush(); state.cho = cJamo; }
+    }
+  } else if (vJamo) {
+    // ÖNEMLİ: 2-beolsik'te "sessiz" başlangıç ㅇ'nın kendi tuşu vardır (d)
+    // ve OTOMATİK eklenmez — gerçek klavyede de böyledir. Bu yüzden 초성
+    // olmadan da bir ünlü bekletilebilir (örn. "ㅗ" sonra "ㅏ" gelirse
+    // birleşip "ㅘ" olabilir).
+    if (!state.jung) {
+      state.jung = vJamo;
+    } else if (state.jung && !state.jong) {
+      const compound = KO_COMPOUND_JUNG[state.jung + vJamo];
+      if (compound) state.jung = compound;
+      else { doFlush(); state.jung = vJamo; }
+    } else {
+      // cho+jung+jong'un hepsi dolu: 종성 bir sonraki heceye 초성 olarak taşınır.
+      let carriedCho;
+      if (KO_JONG_SPLIT[state.jong]) {
+        const [keep, carry] = KO_JONG_SPLIT[state.jong];
+        state.jong = keep;
+        carriedCho = carry;
+      } else {
+        carriedCho = state.jong;
+        state.jong = null;
+      }
+      doFlush();
+      state.cho = carriedCho;
+      state.jung = vJamo;
+    }
+  } else {
+    return null; // jamo tuşu değil (rakam, noktalama, boşluk...)
+  }
+  return flushed;
+}
+
+function koRenderPending(state) {
+  if (state.cho && state.jung) return hangulCompose(state.cho, state.jung, state.jong || '');
+  if (state.cho) return state.cho;
+  if (state.jung) return state.jung;
+  return '';
+}
+
+// Latin harflerden oluşan bir diziyi (örn. "rkskek") toplu olarak Hangıl'a
+// çevirir (test/araç amaçlı — asıl canlı yazma deneyimi koImeBind'dadır).
+function koRomanizeToHangul(latin) {
+  const state = { cho: null, jung: null, jong: null };
+  let result = '';
+  for (const ch of latin) {
+    const flushed = koAssembleStep(state, ch);
+    if (flushed === null) {
+      result += koRenderPending(state);
+      state.cho = null; state.jung = null; state.jong = null;
+      result += ch;
+    } else {
+      result += flushed;
+    }
+  }
+  result += koRenderPending(state);
+  return result;
+}
+
+// input/textarea'ya bağlanır: her tuşa basışta (keydown) o tuşu anında
+// Hangıl'a çevirir — bekleyen (henüz kesinleşmemiş) hece durumu elemana özel
+// olarak saklanır, böylece "g" sonra "k" gibi ayrı tuş vuruşları doğru
+// şekilde birleşip tek bir heceye ("가") dönüşür. Jamo olmayan tuşlar
+// (boşluk, noktalama, ok tuşları...) bekleyen heceyi kesinleştirip normal
+// şekilde işlenmeye bırakılır. Backspace, yarım kalan heceyi tek seferde siler.
+const KO_IME_HANDLERS = new WeakMap();
+
+function koImeBind(el) {
+  if (!el || KO_IME_HANDLERS.has(el)) return;
+  const state = { cho: null, jung: null, jong: null };
+  let pendingLen = 0;
+
+  function resetState() {
+    state.cho = null; state.jung = null; state.jong = null;
+    pendingLen = 0;
+  }
+
+  const handler = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) { resetState(); return; }
+
+    if (e.key === 'Backspace' && pendingLen > 0) {
+      e.preventDefault();
+      const pos = el.selectionStart;
+      const newValue = el.value.slice(0, pos - pendingLen) + el.value.slice(pos);
+      el.value = newValue;
+      el.setSelectionRange(pos - pendingLen, pos - pendingLen);
+      resetState();
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+
+    if (e.key.length !== 1 || (!KO_CONSONANT_KEYS[e.key] && !KO_VOWEL_KEYS[e.key])) {
+      resetState();
+      return; // Enter/Tab/ok tuşları, boşluk, noktalama, rakam vb. — normal davranışa bırak
+    }
+
+    e.preventDefault();
+    const pos = el.selectionStart;
+    const before = el.value.slice(0, pos - pendingLen);
+    const after = el.value.slice(pos);
+    const flushed = koAssembleStep(state, e.key);
+    const pending = koRenderPending(state);
+    const newValue = before + flushed + pending + after;
+    el.value = newValue;
+    pendingLen = pending.length;
+    const newPos = before.length + flushed.length + pending.length;
+    el.setSelectionRange(newPos, newPos);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  KO_IME_HANDLERS.set(el, handler);
+  el.addEventListener('keydown', handler);
+}
+
+function koImeUnbind(el) {
+  const handler = el && KO_IME_HANDLERS.get(el);
+  if (!handler) return;
+  el.removeEventListener('keydown', handler);
+  KO_IME_HANDLERS.delete(el);
+}

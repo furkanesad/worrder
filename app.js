@@ -576,12 +576,17 @@ function makeSpeakButton(text, lang) {
 const IME_INPUT_IDS = ['word-input', 'sentence-input', 'word-search', 'stats-search', 'flashcard-search'];
 
 function applyImeBinding() {
-  if (typeof wanakana === 'undefined') return;
   IME_INPUT_IDS.forEach((id) => {
     const el = document.getElementById(id);
     if (!el) return;
-    if (currentLang === 'ja') wanakana.bind(el);
-    else wanakana.unbind(el);
+    if (typeof wanakana !== 'undefined') {
+      if (currentLang === 'ja') wanakana.bind(el);
+      else wanakana.unbind(el);
+    }
+    if (typeof koImeBind === 'function') {
+      if (currentLang === 'ko') koImeBind(el);
+      else koImeUnbind(el);
+    }
   });
 }
 
@@ -1286,8 +1291,14 @@ function runGenerate() {
   resultBox.dataset.text = outcome.text;
   resultBox.dataset.lang = currentLang;
   resultText.innerHTML = displayHtml(outcome.text);
+  renderMissingWordChips('gen-missing-words', outcome.text);
 
-  if (currentLang === 'ja' && !jaTokenizer) ensureJaTokenizer(() => { resultText.innerHTML = displayHtml(resultBox.dataset.text); });
+  if (currentLang === 'ja' && !jaTokenizer) {
+    ensureJaTokenizer(() => {
+      resultText.innerHTML = displayHtml(resultBox.dataset.text);
+      renderMissingWordChips('gen-missing-words', resultBox.dataset.text);
+    });
+  }
 
   if (currentLang === 'ja' && typeof window.jaGrammarChecker !== 'undefined') {
     runGrammarCheck(outcome.text).then((res) => renderGrammarResult(grammarBox, res));
@@ -1593,9 +1604,9 @@ const LANG_UI_TEXT = {
     seedBtn: 'Örnek 100 kelime + 20 cümle + 2 paragraf yükle',
   },
   ko: {
-    searchPlaceholder: 'Hangıl yaz...',
-    wordPlaceholder: 'Yeni kelime (Hangıl)',
-    sentencePlaceholder: 'Yeni cümle yaz...',
+    searchPlaceholder: 'Latin harflerle yaz (örn. rk = 가)...',
+    wordPlaceholder: 'Yeni kelime — Latin harflerle yaz (örn. rk = 가)',
+    sentencePlaceholder: 'Yeni cümle yaz — Latin harflerle yaz (örn. rk = 가)...',
     seedBtn: 'Örnek 100 kelime + 20 cümle yükle',
   },
 };
