@@ -1,83 +1,80 @@
 // Otomatik Cümle Oluşturucu - tamamen offline, kural/şablon tabanlı Japonca
 // cümle üreteci. Harici bir servise veya yapay zekaya ihtiyaç duymaz:
-// JLPT seviyelerine göre gruplanmış kelime bankaları + standart Japonca
+// JLPT seviyelerine göre gruplanmış kelime bankaları (generator-vocab.js —
+// elzup/jlpt-word-list'ten tek seferlik içe aktarıldı) + standart Japonca
 // çekim kurallarını (godan/ichidan/suru/kuru, i-sıfat/na-sıfat) birleştirip
 // gramer kalıplarına yerleştirir. Okunuş (furigana) ve gramer kontrolü için
 // app.js'teki kuromoji tabanlı altyapı (jaAnalyze, runGrammarCheck) aynen
 // kullanılır — burada tekrar edilmez.
+//
+// Cümle bağlamı (ör. "犬を書く", "先生を飲む" gibi anlamsız fiil-nesne
+// eşleşmeleri) şöyle önleniyor: nesne alan fiiller (GEN_CURATED_VERBS içinde
+// objectCats alanı olanlar) sadece o kategoriyle eşleşen isimlerle
+// birleştiriliyor (örn. 飲む sadece "drink" kategorisindeki isimleri alır).
+// Bu yüzden nesne gerektiren kalıplarda SADECE elle doğrulanmış, kategorisi
+// bilinen bu küçük fiil listesi kullanılıyor; internetten içe aktarılan
+// büyük fiil listesi (binlerce fiil) sadece nesnesiz kalıplarda kullanılıyor
+// çünkü hangi nesneleri alabileceklerini güvenle bilmiyoruz.
 
 const GEN_LEVEL_ORDER = ['N5', 'N4', 'N3'];
 
 const GEN_LENGTH_ORDER = ['short', 'medium', 'long'];
 
-// Sabit zamirler: cümlenin öznesi olarak kullanılır (kelime bankasındaki
-// isimleri özne yapmak anlamsız/garip cümlelere yol açabiliyor, örn.
-// "okul öğrencidir" gibi — bu yüzden özne havuzu ayrı tutuluyor).
+// Sabit zamirler: cümlenin öznesi olarak kullanılır.
 const GEN_PRONOUNS = ['私', 'あなた', '彼', '彼女', '私たち'];
 
-// ---------- Kelime bankası (JLPT seviyesine göre) ----------
-// Her fiil/sıfat girdisi çekim türünü taşır (type), böylece gerçek
-// çekim kurallarıyla doğru biçimde çekimlenebilir:
-//   fiil: 'ichidan' | 'godan' | 'suru' | 'kuru' | 'aru' | 'iku'
-//   i-sıfat: 'reg' | 'ii'
-const GEN_VOCAB = {
-  N5: {
-    noun: ['学生', '先生', '学校', '家', '本', '水', '魚', '友達', '電車', '公園', '猫', '犬']
-      .map((jp) => ({ kind: 'noun', jp })),
-    verb: [
-      { kind: 'verb', type: 'ichidan', jp: '食べる', tr: true },
-      { kind: 'verb', type: 'godan', jp: '飲む', tr: true },
-      { kind: 'verb', type: 'ichidan', jp: '見る', tr: true },
-      { kind: 'verb', type: 'iku', jp: '行く' },
-      { kind: 'verb', type: 'kuru', jp: '来る' },
-      { kind: 'verb', type: 'suru', jp: 'する', tr: true },
-      { kind: 'verb', type: 'godan', jp: '買う', tr: true },
-      { kind: 'verb', type: 'godan', jp: '読む', tr: true },
-      { kind: 'verb', type: 'godan', jp: '書く', tr: true },
-      { kind: 'verb', type: 'aru', jp: 'ある' },
-    ],
-    iadj: ['高い', '安い', '大きい', '小さい', '新しい', '古い', 'かわいい']
-      .map((jp) => ({ kind: 'iadj', type: 'reg', jp })),
-    naadj: ['元気', '静か', '好き', '上手']
-      .map((jp) => ({ kind: 'naadj', jp })),
-    time: ['今日', '明日', '毎日', '今'],
-  },
-  N4: {
-    noun: ['会社', '仕事', '病院', '駅', '図書館', '天気', '約束', '予定', '問題', '経験']
-      .map((jp) => ({ kind: 'noun', jp })),
-    verb: [
-      { kind: 'verb', type: 'godan', jp: '働く' },
-      { kind: 'verb', type: 'godan', jp: '始まる' },
-      { kind: 'verb', type: 'godan', jp: '終わる' },
-      { kind: 'verb', type: 'ichidan', jp: '続ける', tr: true },
-      { kind: 'verb', type: 'ichidan', jp: '決める', tr: true },
-      { kind: 'verb', type: 'ichidan', jp: '感じる', tr: true },
-      { kind: 'verb', type: 'godan', jp: '頑張る' },
-      { kind: 'verb', type: 'godan', jp: '知る', tr: true },
-    ],
-    iadj: ['難しい', '忙しい', '楽しい', '危ない', '恥ずかしい']
-      .map((jp) => ({ kind: 'iadj', type: 'reg', jp })),
-    naadj: ['大切', '便利', '親切', '残念']
-      .map((jp) => ({ kind: 'naadj', jp })),
-    time: ['来週', '先週', '来月'],
-  },
-  N3: {
-    noun: ['環境', '社会', '政治', '経済', '文化', '習慣', '関係', '責任']
-      .map((jp) => ({ kind: 'noun', jp })),
-    verb: [
-      { kind: 'verb', type: 'ichidan', jp: '増える' },
-      { kind: 'verb', type: 'godan', jp: '減る' },
-      { kind: 'verb', type: 'godan', jp: '変わる' },
-      { kind: 'verb', type: 'ichidan', jp: '支える', tr: true },
-      { kind: 'verb', type: 'godan', jp: '争う', tr: true },
-      { kind: 'verb', type: 'godan', jp: '悩む' },
-    ],
-    iadj: ['厳しい', '激しい', '珍しい', '恐ろしい']
-      .map((jp) => ({ kind: 'iadj', type: 'reg', jp })),
-    naadj: ['複雑', '重要', '積極的', '消極的']
-      .map((jp) => ({ kind: 'naadj', jp })),
-    time: ['以前', '将来'],
-  },
+const GEN_TIME = {
+  N5: ['今日', '明日', '毎日', '今'],
+  N4: ['来週', '先週', '来月'],
+  N3: ['以前', '将来'],
+};
+
+// ---------- Elle doğrulanmış fiil havuzu (nesne kategorileriyle) ----------
+// objectCats olan fiiller "を" ile nesne alan kalıplarda kullanılır ve nesne
+// SADECE bu kategorilerden seçilir (bkz. generator-vocab.js'teki isim "cat"
+// etiketleri: person/animal/food/drink/reading/vehicle/clothing/place/thing).
+// objectCats olmayanlar (行く/来る/ある gibi geçişsiz fiiller) sadece
+// nesnesiz kalıplarda kullanılır.
+const GEN_CURATED_VERBS = {
+  N5: [
+    { jp: '食べる', type: 'ichidan', objectCats: ['food', 'animal'] },
+    { jp: '飲む', type: 'godan', objectCats: ['drink'] },
+    { jp: '読む', type: 'godan', objectCats: ['reading'] },
+    { jp: '書く', type: 'godan', objectCats: ['reading'] },
+    { jp: '見る', type: 'ichidan', objectCats: ['thing', 'place', 'person', 'animal'] },
+    { jp: '買う', type: 'godan', objectCats: ['thing', 'food', 'clothing', 'vehicle'] },
+    { jp: 'する', type: 'suru', objectCats: ['thing'] },
+    { jp: '聞く', type: 'godan', objectCats: ['reading', 'thing'] },
+    { jp: '待つ', type: 'godan', objectCats: ['person', 'vehicle'] },
+    { jp: '呼ぶ', type: 'godan', objectCats: ['person'] },
+    { jp: '切る', type: 'godan', objectCats: ['food'] },
+    { jp: '行く', type: 'iku' },
+    { jp: '来る', type: 'kuru' },
+    { jp: 'ある', type: 'aru' },
+  ],
+  N4: [
+    { jp: '持つ', type: 'godan', objectCats: ['thing', 'reading', 'clothing'] },
+    { jp: '使う', type: 'godan', objectCats: ['thing', 'vehicle', 'clothing'] },
+    { jp: '作る', type: 'godan', objectCats: ['food', 'thing', 'reading'] },
+    { jp: '開ける', type: 'ichidan', objectCats: ['thing'] },
+    { jp: '教える', type: 'ichidan', objectCats: ['reading', 'thing'] },
+    { jp: '習う', type: 'godan', objectCats: ['reading', 'thing'] },
+    { jp: '手伝う', type: 'godan', objectCats: ['person'] },
+    { jp: '送る', type: 'godan', objectCats: ['reading', 'person'] },
+    { jp: '忘れる', type: 'ichidan', objectCats: ['thing', 'reading'] },
+    { jp: '洗う', type: 'godan', objectCats: ['clothing', 'thing'] },
+    { jp: '探す', type: 'godan', objectCats: ['person', 'thing', 'animal'] },
+    { jp: '働く', type: 'godan' },
+    { jp: '始まる', type: 'godan' },
+    { jp: '終わる', type: 'godan' },
+    { jp: '頑張る', type: 'godan' },
+  ],
+  N3: [
+    { jp: '増える', type: 'ichidan' },
+    { jp: '減る', type: 'godan' },
+    { jp: '変わる', type: 'godan' },
+    { jp: '悩む', type: 'godan' },
+  ],
 };
 
 // ---------- Çekim motoru ----------
@@ -160,36 +157,61 @@ function genPick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function genHasCat(noun, cats) {
+  return noun.cat.some((c) => cats.includes(c));
+}
+
+// Bir fiilin objectCats'iyle eşleşen isimlerden rastgele nesne seçer. Hiç
+// eşleşme yoksa (çok dar bir kelime seviyesi seçilmiş olabilir) genel isim
+// havuzuna düşer — bu durumda anlam garantisi zayıflar ama cümle en azından
+// üretilebilir.
+function genPickObjectFor(verb, nounPool) {
+  const candidates = nounPool.filter((n) => genHasCat(n, verb.objectCats));
+  return genPick(candidates.length ? candidates : nounPool);
+}
+
 // ---------- Gramer şablonları ----------
 // Her (gramer seviyesi × uzunluk) hücresi için bir kalıp. Çeşitlilik kelime
 // seçiminden gelir; daha fazla kalıp eklemek için buraya yeni fonksiyonlar
 // eklemek yeterli.
 function genBuildTemplates(pools) {
+  function objVerbPair(form) {
+    const verb = genPick(pools.verbObj);
+    const obj = genPickObjectFor(verb, pools.noun);
+    return { obj: obj.jp, verb: genConjugateVerb(verb, form) };
+  }
+
   return {
     N5: {
-      short: () => `${genPick(pools.subject)}は${genPick(pools.noun).jp}です。`,
-      medium: () => `${genPick(pools.time)}、${genPick(pools.subject)}は${genPick(pools.noun).jp}を${genConjugateVerb(genPick(pools.verbObj), 'masu')}。`,
+      short: () => `${genPick(pools.subject)}は${genPick(pools.personNoun).jp}です。`,
+      medium: () => {
+        const p = objVerbPair('masu');
+        return `${genPick(pools.time)}、${genPick(pools.subject)}は${p.obj}を${p.verb}。`;
+      },
       long: () => {
         const subject = genPick(pools.subject);
-        const v1 = genConjugateVerb(genPick(pools.verbObj), 'te');
-        const v2 = genConjugateVerb(genPick(pools.verbObj), 'masu');
-        return `${subject}は${genPick(pools.noun).jp}を${v1}、${genPick(pools.noun).jp}を${v2}。`;
+        const p1 = objVerbPair('te');
+        const p2 = objVerbPair('masu');
+        return `${subject}は${p1.obj}を${p1.verb}、${p2.obj}を${p2.verb}。`;
       },
     },
     N4: {
-      short: () => `${genPick(pools.subject)}は${genPick(pools.noun).jp}を${genConjugateVerb(genPick(pools.verbObj), 'te')}もいいです。`,
-      medium: () => `${genPick(pools.noun).jp}が${genPlainPredicateNa(genPick(pools.adj))}ので、${genPick(pools.subject)}は${genConjugateVerb(genPick(pools.verb), 'masu')}。`,
+      short: () => {
+        const p = objVerbPair('te');
+        return `${genPick(pools.subject)}は${p.obj}を${p.verb}もいいです。`;
+      },
+      medium: () => `${genPick(pools.noun).jp}が${genPlainPredicateNa(genPick(pools.adj))}ので、${genPick(pools.subject)}は${genConjugateVerb(genPick(pools.verbAny), 'masu')}。`,
       long: () => {
         const time = genPick(pools.time);
-        const v1 = genConjugateVerb(genPick(pools.verbObj), 'ta');
-        const v2 = genConjugateVerb(genPick(pools.verbObj), 'ta');
-        return `${time}は${genPick(pools.noun).jp}を${v1}り、${genPick(pools.noun).jp}を${v2}りします。`;
+        const p1 = objVerbPair('ta');
+        const p2 = objVerbPair('ta');
+        return `${time}は${p1.obj}を${p1.verb}り、${p2.obj}を${p2.verb}りします。`;
       },
     },
     N3: {
-      short: () => `${genPick(pools.time)}、${genPick(pools.noun).jp}は${genConjugateVerb(genPick(pools.verb), 'plain')}かもしれません。`,
-      medium: () => `${genPick(pools.noun).jp}が${genConjugateVerb(genPick(pools.verb), 'ba')}、${genPick(pools.noun).jp}は${genPlainPredicateDa(genPick(pools.adj))}と思います。`,
-      long: () => `${genPick(pools.subject)}は${genConjugateVerb(genPick(pools.verb), 'ta')}ことがあります。`,
+      short: () => `${genPick(pools.time)}、${genPick(pools.noun).jp}は${genConjugateVerb(genPick(pools.verbAny), 'plain')}かもしれません。`,
+      medium: () => `${genPick(pools.noun).jp}が${genConjugateVerb(genPick(pools.verbAny), 'ba')}、${genPick(pools.noun).jp}は${genPlainPredicateDa(genPick(pools.adj))}と思います。`,
+      long: () => `${genPick(pools.subject)}は${genConjugateVerb(genPick(pools.verbAny), 'ta')}ことがあります。`,
     },
   };
 }
@@ -198,6 +220,13 @@ function genBuildTemplates(pools) {
 // app.js'teki kuromoji tabanlı jaAnalyze() fonksiyonunu kullanır (aynı
 // sayfada global olarak tanımlı). Sözlük motoru henüz hazır değilse veya
 // bir kelime güvenle sınıflandırılamıyorsa o kelime sessizce atlanır.
+//
+// Kullanıcının kelimelerinin hangi nesne kategorilerini alabileceğini
+// bilmiyoruz (İngilizce anlam etiketi yok), bu yüzden isimlere sadece genel
+// "thing" kategorisi veriliyor ve fiiller nesne gerektiren kalıplara asla
+// dahil edilmiyor — sadece nesnesiz kalıplarda (verbAny) kullanılıyor. Bu,
+// bilinmeyen kelimeler için de yanlış fiil-nesne eşleşmesi riskini ortadan
+// kaldırır.
 function genCollectOwnWords(ownWords) {
   const result = { noun: [], verb: [], iadj: [], naadj: [] };
   if (typeof jaAnalyze !== 'function' || !ownWords) return result;
@@ -209,16 +238,12 @@ function genCollectOwnWords(ownWords) {
     const verbTok = tokens.find((t) => t.pos === '動詞');
     if (verbTok) {
       const ct = verbTok.conjugated_type || '';
-      // Kuromoji fiilin geçişli/geçişsiz olduğunu ayırt etmiyor; kullanıcının
-      // kendi kelimeleri çoğunlukla nesne alan fiiller olacağından (行く/来る/
-      // ある gibi birkaç yaygın istisna dışında) varsayılan olarak geçişli
-      // kabul ediyoruz — kesin olmayan ama makul bir yaklaşıklık.
-      if (verbTok.base === '来る') result.verb.push({ kind: 'verb', type: 'kuru', jp: '来る' });
-      else if (verbTok.base === '行く') result.verb.push({ kind: 'verb', type: 'iku', jp: '行く' });
-      else if (verbTok.base === 'ある') result.verb.push({ kind: 'verb', type: 'aru', jp: 'ある' });
-      else if (ct.startsWith('サ変') && w.text.endsWith('する')) result.verb.push({ kind: 'verb', type: 'suru', jp: w.text, tr: true });
-      else if (ct.startsWith('一段')) result.verb.push({ kind: 'verb', type: 'ichidan', jp: verbTok.base, tr: true });
-      else if (ct.startsWith('五段')) result.verb.push({ kind: 'verb', type: 'godan', jp: verbTok.base, tr: true });
+      if (verbTok.base === '来る') result.verb.push({ jp: '来る', type: 'kuru' });
+      else if (verbTok.base === '行く') result.verb.push({ jp: '行く', type: 'iku' });
+      else if (verbTok.base === 'ある') result.verb.push({ jp: 'ある', type: 'aru' });
+      else if (ct.startsWith('サ変') && w.text.endsWith('する')) result.verb.push({ jp: w.text, type: 'suru' });
+      else if (ct.startsWith('一段')) result.verb.push({ jp: verbTok.base, type: 'ichidan' });
+      else if (ct.startsWith('五段')) result.verb.push({ jp: verbTok.base, type: 'godan' });
       return;
     }
 
@@ -233,7 +258,7 @@ function genCollectOwnWords(ownWords) {
       return;
     }
     if (main.pos === '名詞') {
-      result.noun.push({ kind: 'noun', jp: w.text });
+      result.noun.push({ jp: w.text, cat: ['thing'] });
     }
   });
 
@@ -245,36 +270,48 @@ function genCollectOwnWords(ownWords) {
 //         vocabLevel: 'N5'|'N4'|'N3', useOwnWords: boolean, ownWords: [] }
 function generateSentence(opts) {
   const levelIdx = GEN_LEVEL_ORDER.indexOf(opts.vocabLevel);
-  const pool = { noun: [], verb: [], adj: [], time: [] };
+  const levels = GEN_LEVEL_ORDER.slice(0, levelIdx + 1);
+
+  const pool = { noun: [], iadj: [], naadj: [], verbCurated: [], verbImported: [], time: [] };
 
   // Kelime seviyesi kümülatiftir: N3 seçilince N5+N4+N3 kelimeleri de dahil
   // olur (gerçek JLPT hazırlığında da alt seviye kelimeler hâlâ geçerlidir).
-  GEN_LEVEL_ORDER.slice(0, levelIdx + 1).forEach((lv) => {
-    pool.noun = pool.noun.concat(GEN_VOCAB[lv].noun);
-    pool.verb = pool.verb.concat(GEN_VOCAB[lv].verb);
-    pool.adj = pool.adj.concat(GEN_VOCAB[lv].iadj, GEN_VOCAB[lv].naadj);
-    pool.time = pool.time.concat(GEN_VOCAB[lv].time);
+  levels.forEach((lv) => {
+    pool.noun = pool.noun.concat(GEN_IMPORTED_VOCAB[lv].nouns);
+    pool.iadj = pool.iadj.concat(GEN_IMPORTED_VOCAB[lv].iadj.map((a) => ({ kind: 'iadj', jp: a.jp, type: a.type })));
+    pool.naadj = pool.naadj.concat(GEN_IMPORTED_VOCAB[lv].naadj.map((a) => ({ kind: 'naadj', jp: a.jp })));
+    pool.verbCurated = pool.verbCurated.concat(GEN_CURATED_VERBS[lv]);
+    pool.verbImported = pool.verbImported.concat(GEN_IMPORTED_VOCAB[lv].verbs);
+    pool.time = pool.time.concat(GEN_TIME[lv]);
   });
 
+  let ownNoun = [];
+  let ownVerb = [];
+  let ownAdj = [];
   if (opts.useOwnWords) {
     const own = genCollectOwnWords(opts.ownWords);
-    pool.noun = pool.noun.concat(own.noun);
-    pool.verb = pool.verb.concat(own.verb);
-    pool.adj = pool.adj.concat(own.iadj, own.naadj);
+    ownNoun = own.noun;
+    ownVerb = own.verb;
+    ownAdj = own.iadj.concat(own.naadj);
   }
 
-  const verbObj = pool.verb.filter((v) => v.tr);
+  const noun = pool.noun.concat(ownNoun);
+  const personNoun = noun.filter((n) => genHasCat(n, ['person']));
+  const adj = pool.iadj.concat(pool.naadj, ownAdj);
+  const verbObj = pool.verbCurated.filter((v) => v.objectCats && v.objectCats.length);
+  const verbAny = pool.verbCurated.concat(pool.verbImported, ownVerb);
 
-  if (pool.noun.length < 2 || pool.verb.length < 1 || pool.adj.length < 1 || verbObj.length < 1) {
+  if (noun.length < 2 || adj.length < 1 || verbObj.length < 1 || verbAny.length < 1 || personNoun.length < 1) {
     return { error: 'Bu ayarlarla yeterli kelime bulunamadı. Kelime seviyesini yükselt ya da "kendi kelimelerim" seçeneğini kapat.' };
   }
 
   const pools = {
     subject: GEN_PRONOUNS,
-    noun: pool.noun,
-    verb: pool.verb,
+    noun,
+    personNoun,
+    adj,
     verbObj,
-    adj: pool.adj,
+    verbAny,
     time: pool.time,
   };
 
