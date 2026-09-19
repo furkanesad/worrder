@@ -131,6 +131,7 @@ h3 {
 }
 
 input[type="text"],
+input[type="password"],
 select,
 textarea {
   flex: 1;
@@ -636,4 +637,88 @@ button:hover {
 .generated-sentence .item-title {
   font-size: 18px;
   margin-bottom: 4px;
+}
+
+.sync-panel {
+  margin-bottom: 12px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+}
+
+.sync-panel summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #555;
+  list-style-position: inside;
+}
+
+.sync-badge {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #f0f0f0;
+  color: #888;
+  font-size: 11px;
+}
+
+.sync-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+
+.sync-help {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #777;
+}
+
+.sync-steps {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #555;
+}
+
+.sync-steps a {
+  color: #3478f6;
+}
+
+.sync-status {
+  margin: 0;
+  min-height: 16px;
+  font-size: 12px;
+  color: #1e7a45;
+}
+
+.sync-status.error {
+  color: #c0392b;
+}
+
+.sync-backup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed #ddd;
+}
+
+.sync-backup-title {
+  font-size: 12px;
+  color: #999;
+}
+
+.file-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
 }

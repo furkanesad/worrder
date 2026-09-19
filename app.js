@@ -97,16 +97,24 @@ function readJSON(key, fallback) {
   }
 }
 
+// Her kayıt sonrası (bağlıysa) bulut senkronizasyonu kısa bir gecikmeyle tetiklenir.
+function notifyDataSaved() {
+  if (typeof scheduleSync === 'function') scheduleSync();
+}
+
 function saveCategories() {
   localStorage.setItem(storageKeys(currentLang).categories, JSON.stringify(categories));
+  notifyDataSaved();
 }
 
 function saveWords() {
   localStorage.setItem(storageKeys(currentLang).words, JSON.stringify(words));
+  notifyDataSaved();
 }
 
 function saveSentences() {
   localStorage.setItem(storageKeys(currentLang).sentences, JSON.stringify(sentences));
+  notifyDataSaved();
 }
 
 function makeId() {
@@ -1114,9 +1122,25 @@ function addWordEntry(text, extra) {
   const word = { id: makeId(), text, categoryIds: [], type: null, ...extra };
   words.push(word);
   saveWords();
-  translateText(text, currentLang).then((meaning) => {
+  const lang = currentLang;
+  translateText(text, lang).then((meaning) => {
     if (!meaning) return;
-    word.meaning = meaning;
+    if (lang !== currentLang) {
+      // Çeviri gelene kadar dil değiştirilmiş: anlamı o dilin kayıtlı listesine yaz.
+      const key = storageKeys(lang).words;
+      const stored = readJSON(key, []);
+      const target = stored.find((w) => w.id === word.id);
+      if (target) {
+        target.meaning = meaning;
+        localStorage.setItem(key, JSON.stringify(stored));
+        notifyDataSaved();
+      }
+      return;
+    }
+    // Bu arada senkronizasyon listeyi yenilemiş olabilir; güncel nesneyi kimlikle bul.
+    const target = words.find((w) => w.id === word.id);
+    if (!target) return;
+    target.meaning = meaning;
     saveWords();
     renderWordList();
     renderStats();
@@ -2026,4 +2050,5 @@ setupKanjiButton('word-kanji-btn', 'word-input', 'word-kanji-candidates');
 setupKanjiButton('sentence-kanji-btn', 'sentence-input', 'sentence-kanji-candidates');
 setupGrammarButton('sentence-grammar-btn', 'sentence-input', 'sentence-grammar-result');
 setupSeedButton();
+setupSyncUi();
 ensureJaTokenizer();

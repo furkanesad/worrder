@@ -165,6 +165,41 @@
   </main>
 
   <footer class="app-footer">
+    <details class="sync-panel" id="sync-panel">
+      <summary>Yedekleme ve senkronizasyon <span id="sync-badge" class="sync-badge">bağlı değil</span></summary>
+      <div class="sync-body">
+        <p class="sync-help">Verilerin bu tarayıcıda saklanır. Telefon ve bilgisayarın aynı listeyi görmesi için ücretsiz GitHub hesabınla bağlan: veriler senin hesabında gizli (secret) bir gist dosyasında tutulur, başka kimseye gitmez.</p>
+
+        <div id="sync-disconnected">
+          <ol class="sync-steps">
+            <li><a href="https://github.com/settings/tokens/new?description=Kelime%20Defterim&amp;scopes=gist" target="_blank" rel="noopener">Bu bağlantıdan</a> token oluştur (yalnızca "gist" izni seçili gelir), en altta "Generate token"a bas ve token'ı kopyala.</li>
+            <li>Token'ı aşağıya yapıştırıp Bağlan'a bas. Diğer cihazında aynı token ile bağlan.</li>
+          </ol>
+          <div class="row">
+            <input type="password" id="sync-token" placeholder="ghp_..." autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button type="button" id="sync-connect-btn">Bağlan</button>
+          </div>
+        </div>
+
+        <div id="sync-connected" hidden>
+          <div class="row">
+            <button type="button" id="sync-now-btn">Şimdi senkronize et</button>
+            <button type="button" id="sync-disconnect-btn" class="kanji-btn">Bağlantıyı kes</button>
+          </div>
+        </div>
+
+        <p id="sync-status" class="sync-status" aria-live="polite"></p>
+
+        <div class="sync-backup">
+          <div class="sync-backup-title">Yedek dosyası (bağlantı gerektirmez)</div>
+          <div class="row">
+            <button type="button" id="backup-export-btn" class="kanji-btn">Yedeği indir</button>
+            <label class="kanji-btn file-btn">Yedeği yükle<input type="file" id="backup-import-input" accept="application/json,.json" hidden></label>
+          </div>
+          <p class="sync-help">Yedek yüklemek mevcut verilerin üzerine yazmaz, birleştirir.</p>
+        </div>
+      </div>
+    </details>
     <button id="seed-data-btn" class="seed-btn" type="button">Örnek 100 kelime + 20 cümle + 2 paragraf yükle</button>
   </footer>
 
@@ -177,6 +212,7 @@
   <script src="ko-hangul.js"></script>
   <script src="ko-vocab.js"></script>
   <script src="ko-generator.js"></script>
+  <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
