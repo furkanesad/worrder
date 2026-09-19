@@ -655,15 +655,6 @@ button:hover {
   list-style-position: inside;
 }
 
-.sync-badge {
-  margin-left: 6px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  background: #f0f0f0;
-  color: #888;
-  font-size: 11px;
-}
-
 .sync-body {
   display: flex;
   flex-direction: column;
@@ -686,10 +677,6 @@ button:hover {
   color: #555;
 }
 
-.sync-steps a {
-  color: #3478f6;
-}
-
 .sync-status {
   margin: 0;
   min-height: 16px;
@@ -699,19 +686,6 @@ button:hover {
 
 .sync-status.error {
   color: #c0392b;
-}
-
-.sync-backup {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px dashed #ddd;
-}
-
-.sync-backup-title {
-  font-size: 12px;
-  color: #999;
 }
 
 .file-btn {

@@ -1,17 +1,14 @@
-// Bulut senkronizasyonu (kullanıcının kendi GitHub hesabındaki gizli bir gist)
-// ve JSON yedek indirme/yükleme. Sunucu yok: veri tarayıcı ile GitHub arasında
-// doğrudan gider, token sadece bu tarayıcının localStorage'ında durur.
+// Yedek dosyası (JSON) indirme/yükleme ve iki veri kümesini kayıpsız birleştirme.
+// Sunucu/hesap yok: her şey tarayıcıda olur, dosyayı sen taşırsın.
 //
-// Birleştirme "üç yönlü" yapılır (git gibi): son başarılı senkronizasyonun
-// kopyası (base) ile şu anki yerel veri ve buluttaki veri karşılaştırılır.
-// Böylece iki cihazda yapılan farklı değişiklikler kaybolmaz ve silmeler
-// doğru yayılır — "son yazan kazanır" yöntemi bunu yapamazdı.
+// Birleştirme "üç yönlü" tasarlandı (son ortak kopya + yerel + gelen): iki
+// tarafta yapılan farklı değişiklikler kaybolmaz, silmeler doğru yayılır,
+// aynı kelime/cümle iki tarafta ayrı eklendiyse tekleştirilir. Yedek yüklerken
+// ortak kopya olmadığı için sonuç "birleşim"dir — yani mevcut veri silinmez.
 
-const SYNC_FILE = 'kelime-defterim-sync.json';
-const SYNC_CFG_KEY = 'kd_sync_cfg';
-const SYNC_BASE_KEY = 'kd_sync_base';
 const SYNC_LANGS = ['ja', 'ko'];
-const SYNC_DEBOUNCE_MS = 2500;
+// Önceki (kaldırılan) GitHub senkronizasyonundan kalmış olabilecek kayıtlar.
+const LEGACY_SYNC_KEYS = ['kd_sync_cfg', 'kd_sync_base'];
 
 class SyncError extends Error {
   constructor(message, status) {
@@ -257,149 +254,6 @@ function syncCount(data) {
   return { words: w, sentences: s };
 }
 
-// ---------- GitHub Gist ----------
-
-function syncGetCfg() {
-  return readJSON(SYNC_CFG_KEY, null);
-}
-
-function syncSetCfg(cfg) {
-  if (cfg) localStorage.setItem(SYNC_CFG_KEY, JSON.stringify(cfg));
-  else localStorage.removeItem(SYNC_CFG_KEY);
-}
-
-async function syncGh(token, path, opts) {
-  const o = opts || {};
-  const method = o.method || 'GET';
-  // GitHub GET yanıtlarını ~60 sn önbelleğe aldırıyor; başka cihazın yazdığı
-  // veriyi hemen görmek için URL'yi her seferinde benzersiz yapıyoruz (özel
-  // başlıklar CORS ön kontrolünü bozabileceğinden başlık yerine parametre).
-  const url = `https://api.github.com${path}${method === 'GET' ? `${path.includes('?') ? '&' : '?'}_=${Date.now()}` : ''}`;
-  const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' };
-  if (o.body) headers['Content-Type'] = 'application/json';
-
-  let res;
-  try {
-    res = await fetch(url, { method, headers, body: o.body ? JSON.stringify(o.body) : undefined });
-  } catch (e) {
-    throw new SyncError('GitHub\'a ulaşılamadı (internet bağlantını kontrol et).', 0);
-  }
-  if (res.status === 401) throw new SyncError('Token geçersiz veya süresi dolmuş. Bağlantıyı kesip yeni bir token ile tekrar bağlan.', 401);
-  if (res.status === 403) throw new SyncError('GitHub isteği reddetti (token izni eksik ya da istek sınırı doldu). Biraz sonra tekrar dene.', 403);
-  if (res.status === 404) throw new SyncError('Gist bulunamadı (silinmiş olabilir). Bağlantıyı kesip yeniden bağlan.', 404);
-  if (!res.ok) throw new SyncError(`GitHub hatası (${res.status}).`, res.status);
-  return res;
-}
-
-async function syncFetchRemote(cfg) {
-  const res = await syncGh(cfg.token, `/gists/${cfg.gistId}`);
-  const gist = await res.json();
-  const file = gist.files && gist.files[SYNC_FILE];
-  if (!file) return null;
-
-  let content = file.content;
-  if (file.truncated && file.raw_url) {
-    const raw = await fetch(`${file.raw_url}${file.raw_url.includes('?') ? '&' : '?'}_=${Date.now()}`);
-    content = await raw.text();
-  }
-  if (!content || !content.trim()) return null;
-
-  let doc;
-  try {
-    doc = JSON.parse(content);
-  } catch (e) {
-    throw new SyncError('Buluttaki dosya bozuk görünüyor; üzerine yazmamak için durdum.', 0);
-  }
-  if (doc.version && doc.version > 1) throw new SyncError('Buluttaki veri daha yeni bir uygulama sürümüne ait; sayfayı yenile.', 0);
-  return syncCanonData(syncSanitize(doc.data));
-}
-
-async function syncPushRemote(cfg, data) {
-  const content = JSON.stringify({ app: 'kelime-defterim', version: 1, savedAt: new Date().toISOString(), data });
-  await syncGh(cfg.token, `/gists/${cfg.gistId}`, { method: 'PATCH', body: { files: { [SYNC_FILE]: { content } } } });
-}
-
-let syncRunning = false;
-let syncQueued = false;
-let syncTimer = null;
-let syncLastRunAt = 0;
-
-function scheduleSync(delay) {
-  if (!syncGetCfg()) return;
-  clearTimeout(syncTimer);
-  syncTimer = setTimeout(runSync, delay === undefined ? SYNC_DEBOUNCE_MS : delay);
-}
-
-async function runSync() {
-  const cfg = syncGetCfg();
-  if (!cfg) return;
-  if (syncRunning) {
-    syncQueued = true;
-    return;
-  }
-  syncRunning = true;
-  syncSetStatus('busy', 'Senkronize ediliyor...');
-
-  try {
-    const remote = await syncFetchRemote(cfg);
-    const baseDoc = readJSON(SYNC_BASE_KEY, null);
-    const base = baseDoc ? syncCanonData(syncSanitize(baseDoc)) : null;
-    const local = syncCollectLocal();
-    const merged = syncMergeAll(base, local, remote);
-
-    if (syncStable(merged) !== syncStable(local)) syncApplyLocal(merged);
-    if (!remote || syncStable(merged) !== syncStable(remote)) await syncPushRemote(cfg, merged);
-
-    localStorage.setItem(SYNC_BASE_KEY, JSON.stringify(merged));
-    syncLastRunAt = Date.now();
-    syncSetCfg({ ...cfg, lastSync: syncLastRunAt });
-    syncSetStatus('ok');
-  } catch (e) {
-    syncSetStatus('error', e instanceof SyncError ? e.message : `Senkronizasyon hatası: ${e.message}`);
-  } finally {
-    syncRunning = false;
-    if (syncQueued) {
-      syncQueued = false;
-      scheduleSync(300);
-    }
-  }
-}
-
-async function syncConnect(rawToken) {
-  const token = (rawToken || '').trim();
-  if (!token) throw new SyncError('Önce token\'ı yapıştır.', 0);
-
-  let found = null;
-  let scopes = null;
-  for (let page = 1; page <= 5 && !found; page++) {
-    const res = await syncGh(token, `/gists?per_page=100&page=${page}`);
-    scopes = res.headers.get('x-oauth-scopes');
-    const list = await res.json();
-    found = list.find((g) => g.files && g.files[SYNC_FILE]) || null;
-    if (list.length < 100) break;
-  }
-  if (scopes !== null && !/\bgist\b/.test(scopes)) {
-    throw new SyncError('Bu token\'da "gist" izni yok. Yukarıdaki bağlantıdan yeni bir token oluştur.', 403);
-  }
-
-  let gistId = found && found.id;
-  if (!gistId) {
-    const res = await syncGh(token, '/gists', {
-      method: 'POST',
-      body: {
-        description: 'Kelime Defterim senkronizasyon verisi (silme)',
-        public: false,
-        files: { [SYNC_FILE]: { content: JSON.stringify({ app: 'kelime-defterim', version: 1, data: syncSanitize({}) }) } },
-      },
-    });
-    gistId = (await res.json()).id;
-  }
-
-  syncSetCfg({ token, gistId, lastSync: null });
-  localStorage.removeItem(SYNC_BASE_KEY);
-  await runSync();
-}
-
 // ---------- Yedek dosyası ----------
 
 function syncExportBackup() {
@@ -433,83 +287,27 @@ async function syncImportBackup(file) {
   const merged = syncMergeAll(null, local, imported);
   syncApplyLocal(merged);
   const after = syncCount(merged);
-  scheduleSync();
   return { words: after.words - before.words, sentences: after.sentences - before.sentences };
 }
 
 // ---------- Arayüz ----------
 
-function syncSetStatus(kind, message) {
-  const statusEl = document.getElementById('sync-status');
-  const badge = document.getElementById('sync-badge');
-  if (!statusEl || !badge) return;
-
-  const cfg = syncGetCfg();
-  statusEl.classList.toggle('error', kind === 'error');
-
-  if (kind === 'ok') {
-    const t = cfg && cfg.lastSync ? new Date(cfg.lastSync).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
-    statusEl.textContent = `Senkronize edildi${t ? ` (${t})` : ''}.`;
-    badge.textContent = 'bağlı';
-  } else if (kind === 'busy') {
-    statusEl.textContent = message;
-    badge.textContent = 'senkronize ediliyor';
-  } else if (kind === 'error') {
-    statusEl.textContent = message;
-    badge.textContent = 'hata';
-  } else {
-    statusEl.textContent = message || '';
-    badge.textContent = cfg ? 'bağlı' : 'bağlı değil';
-  }
+function syncSetStatus(message, isError) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.toggle('error', !!isError);
 }
 
-function syncRenderUi() {
-  const connected = !!syncGetCfg();
-  document.getElementById('sync-disconnected').hidden = connected;
-  document.getElementById('sync-connected').hidden = !connected;
-  if (!connected) syncSetStatus('idle', '');
-}
+function setupBackupUi() {
+  // Kaldırılan GitHub yönteminden kalmış bir token varsa cihazda bırakma.
+  LEGACY_SYNC_KEYS.forEach((k) => localStorage.removeItem(k));
 
-function setupSyncUi() {
   if (!document.getElementById('sync-panel')) return;
-
-  const withButton = async (btn, busyText, fn) => {
-    const original = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = busyText;
-    try {
-      await fn();
-    } catch (e) {
-      syncSetStatus('error', e instanceof SyncError ? e.message : `Hata: ${e.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = original;
-    }
-  };
-
-  document.getElementById('sync-connect-btn').addEventListener('click', () => {
-    const input = document.getElementById('sync-token');
-    withButton(document.getElementById('sync-connect-btn'), 'Bağlanılıyor...', async () => {
-      await syncConnect(input.value);
-      if (syncGetCfg()) input.value = '';
-      syncRenderUi();
-    });
-  });
-
-  document.getElementById('sync-now-btn').addEventListener('click', () => {
-    withButton(document.getElementById('sync-now-btn'), 'Senkronize ediliyor...', () => runSync());
-  });
-
-  document.getElementById('sync-disconnect-btn').addEventListener('click', () => {
-    syncSetCfg(null);
-    localStorage.removeItem(SYNC_BASE_KEY);
-    syncRenderUi();
-    syncSetStatus('idle', 'Bağlantı kesildi. Bu cihazdaki veriler olduğu gibi duruyor.');
-  });
 
   document.getElementById('backup-export-btn').addEventListener('click', () => {
     syncExportBackup();
-    syncSetStatus('idle', 'Yedek dosyası indirildi.');
+    syncSetStatus('Yedek dosyası indirildi.');
   });
 
   document.getElementById('backup-import-input').addEventListener('change', async (e) => {
@@ -518,17 +316,9 @@ function setupSyncUi() {
     if (!file) return;
     try {
       const added = await syncImportBackup(file);
-      syncSetStatus('idle', `Yedek yüklendi: ${added.words} yeni kelime, ${added.sentences} yeni cümle eklendi.`);
+      syncSetStatus(`Yedek yüklendi: ${added.words} yeni kelime, ${added.sentences} yeni cümle eklendi.`);
     } catch (err) {
-      syncSetStatus('error', err instanceof SyncError ? err.message : `Yedek yüklenemedi: ${err.message}`);
+      syncSetStatus(err instanceof SyncError ? err.message : `Yedek yüklenemedi: ${err.message}`, true);
     }
   });
-
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && syncGetCfg() && Date.now() - syncLastRunAt > 15000) scheduleSync(300);
-  });
-  window.addEventListener('online', () => scheduleSync(500));
-
-  syncRenderUi();
-  if (syncGetCfg()) scheduleSync(800);
 }

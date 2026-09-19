@@ -97,24 +97,16 @@ function readJSON(key, fallback) {
   }
 }
 
-// Her kayıt sonrası (bağlıysa) bulut senkronizasyonu kısa bir gecikmeyle tetiklenir.
-function notifyDataSaved() {
-  if (typeof scheduleSync === 'function') scheduleSync();
-}
-
 function saveCategories() {
   localStorage.setItem(storageKeys(currentLang).categories, JSON.stringify(categories));
-  notifyDataSaved();
 }
 
 function saveWords() {
   localStorage.setItem(storageKeys(currentLang).words, JSON.stringify(words));
-  notifyDataSaved();
 }
 
 function saveSentences() {
   localStorage.setItem(storageKeys(currentLang).sentences, JSON.stringify(sentences));
-  notifyDataSaved();
 }
 
 function makeId() {
@@ -1133,8 +1125,7 @@ function addWordEntry(text, extra) {
       if (target) {
         target.meaning = meaning;
         localStorage.setItem(key, JSON.stringify(stored));
-        notifyDataSaved();
-      }
+            }
       return;
     }
     // Bu arada senkronizasyon listeyi yenilemiş olabilir; güncel nesneyi kimlikle bul.
@@ -2050,5 +2041,5 @@ setupKanjiButton('word-kanji-btn', 'word-input', 'word-kanji-candidates');
 setupKanjiButton('sentence-kanji-btn', 'sentence-input', 'sentence-kanji-candidates');
 setupGrammarButton('sentence-grammar-btn', 'sentence-input', 'sentence-grammar-result');
 setupSeedButton();
-setupSyncUi();
+setupBackupUi();
 ensureJaTokenizer();
