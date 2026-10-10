@@ -2158,42 +2158,6 @@ function setupBackup(){
 
 
 // ---------- GitHub sürümü: Claude API ve indirme ----------
-const KEY_LS = 'okuma-api-key';
-const getKey = () => { try{ return localStorage.getItem(KEY_LS) || ''; }catch(e){ return ''; } };
-const MODELS = {default:'claude-sonnet-5-5', quick:'claude-haiku-5-5'};
-function makeSample(){
-  const call = async (prompt, o) => {
-    o = o || {};
-    const key = getKey();
-    if (!key) throw {code:'no_key', message:'Claude API anahtarı gerekli (sağ üstteki 🔑 düğmesi).'};
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', signal:o.signal,
-      headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:MODELS[o.modelTier]||MODELS.default, max_tokens:o.modelTier==='quick'?2000:16000, stream:true, messages:[{role:'user', content:prompt}]})
-    });
-    if (!r.ok){ let m=''; try{ m=(await r.json()).error.message; }catch(e){} throw {code:'http_'+r.status, message:m}; }
-    const rd = r.body.getReader(), dec = new TextDecoder(); let buf='', text='', truncated=false;
-    for(;;){
-      const {done, value} = await rd.read(); if (done) break;
-      buf += dec.decode(value, {stream:true});
-      const lines = buf.split('\n'); buf = lines.pop();
-      for (const ln of lines){
-        if (!ln.startsWith('data:')) continue;
-        let ev; try{ ev = JSON.parse(ln.slice(5)); }catch(e){ continue; }
-        if (ev.type==='content_block_delta' && ev.delta && ev.delta.text){ text += ev.delta.text; if (o.onText) o.onText({text}); }
-        if (ev.type==='message_delta' && ev.delta && ev.delta.stop_reason==='max_tokens') truncated = true;
-      }
-    }
-    return {text, truncated};
-  };
-  call.json = async (prompt, o) => {
-    const r = await call(prompt, o);
-    const m = r.text.match(/\{[\s\S]*\}/);
-    if (!m) throw {code:'bad_answer'};
-    return JSON.parse(m[0]);
-  };
-  return call;
-}
 function makeDownloads(){
   return {save: async ({filename, data}) => {
     const a = document.createElement('a');
@@ -2203,16 +2167,6 @@ function makeDownloads(){
   }};
 }
 function installKeyBar(){
-  const b = document.createElement('button');
-  b.className = 'ghost'; b.style.cssText = 'position:fixed;top:8px;right:8px;z-index:30';
-  const upd = () => { b.textContent = getKey() ? '🔑 Claude anahtarı var' : '🔑 Claude anahtarı ekle'; };
-  b.onclick = () => {
-    const k = prompt('Anthropic API anahtarı (sk-ant-...). Yalnızca bu tarayıcıda saklanır. Silmek için boş bırak.', getKey());
-    if (k === null) return;
-    try{ k.trim() ? localStorage.setItem(KEY_LS, k.trim()) : localStorage.removeItem(KEY_LS); }catch(e){}
-    location.reload();
-  };
-  upd(); document.body.appendChild(b);
   const back = document.createElement('a');
   back.href = 'index.html'; back.textContent = '← Kelime Defterim';
   back.style.cssText = 'position:fixed;top:12px;left:8px;z-index:30;font-size:.85rem';
@@ -2223,7 +2177,9 @@ function installKeyBar(){
 (async () => {
   renderProgress();
   // GitHub sürümü: claude.ai çalışma zamanı yok. Claude çağrıları tarayıcıdan, kullanıcının kendi API anahtarıyla yapılır; veri localStorage'da.
-  sample = makeSample(); downloads = makeDownloads();
+  // Claude bağlantısı yok: metinler claude.ai'de üretilir, yedek dosyasıyla buraya yüklenir.
+  sample = null; downloads = makeDownloads();
+  $('next').hidden = true; if ($('addbox')) $('addbox').hidden = true;
   installKeyBar();
   await load();
   st.cv = fix(st.cv, V.length); st.cg = fix(st.cg, G.length);
@@ -2237,7 +2193,7 @@ function installKeyBar(){
   renderArchive();
   $('next').disabled = false; $('next').textContent = 'Sonraki metin'; $('m-add').disabled = false;
   updateCardCount();
-  if (!sample) $('status').innerHTML = '<span class="err">Claude bağlantısı yok: yeni metin üretilemez, kayıtlı metinleri okuyabilirsin. Sayfayı claude.ai\'de giriş yapmış olarak aç.</span>';
+  if (!sample) $('status').textContent = 'Yeni metinleri Claude\'da üret, "Metinler" sekmesindeki Yedekle / geri yükle bölümünden yedek dosyasını yükle. Kelime veya cümleye dokununca anlamı çıkar.';
   setModeUI('read');
   restorePlace();
   setupBackup();
