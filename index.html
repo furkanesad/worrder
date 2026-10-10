@@ -9,7 +9,6 @@
 <body>
   <header>
     <h1>Kelime Defterim</h1>
-    <p style="text-align:center;margin:0 0 8px"><a href="okuma.html">📖 Okuma Defteri (Claude ile metin üretimi ve analiz)</a></p>
     <div class="lang-switch">
       <button type="button" class="lang-btn active" data-lang="ja">🇯🇵 Japonca</button>
       <button type="button" class="lang-btn" data-lang="ko">🇰🇷 Korece</button>
@@ -21,7 +20,7 @@
       <button class="tab-btn" data-tab="generator">Cümle Üret</button>
       <button class="tab-btn" data-tab="stats">İstatistik</button>
       <button class="tab-btn" data-tab="flashcards">Flash Kart</button>
-      <button class="tab-btn" data-tab="curriculum">Müfredat</button>
+      <button class="tab-btn" data-tab="reading">Okuma</button>
     </nav>
   </header>
 
@@ -164,24 +163,9 @@
         <button type="button" id="flashcard-next">Sonraki →</button>
       </div>
     </section>
-      <!-- MÜFREDAT (Okuma Defteri verisi) -->
-    <section id="tab-curriculum" class="tab-panel">
-      <h2>Müfredat N5–N2</h2>
-      <div id="curr-kind" class="chips">
-        <button type="button" class="chip selected" data-kind="grammar">Gramer</button>
-        <button type="button" class="chip" data-kind="kanji">Kanji</button>
-        <button type="button" class="chip" data-kind="vocab">Kelime</button>
-      </div>
-      <div id="curr-level" class="chips">
-        <button type="button" class="chip selected" data-level="all">Tümü</button>
-        <button type="button" class="chip" data-level="N5">N5</button>
-        <button type="button" class="chip" data-level="N4">N4</button>
-        <button type="button" class="chip" data-level="N3">N3</button>
-        <button type="button" class="chip" data-level="N2">N2</button>
-      </div>
-      <input type="text" id="curr-search" class="search-input" placeholder="Ara..." autocomplete="off">
-      <p id="curr-summary" class="summary"></p>
-      <ul id="curr-list" class="item-list"></ul>
+      <!-- OKUMA (Claude ile metin üretimi ve analiz) -->
+    <section id="tab-reading" class="tab-panel">
+      <iframe id="reading-frame" title="Okuma Defteri" data-src="okuma.html"></iframe>
     </section>
 
 </main>
@@ -217,8 +201,12 @@
   <script src="ko-vocab.js"></script>
   <script src="ko-generator.js"></script>
   <script src="sync.js"></script>
-  <script src="curriculum-data.js"></script>
   <script src="app.js"></script>
-  <script src="curriculum.js"></script>
+  <script>
+    document.querySelector('[data-tab="reading"]').addEventListener('click', () => {
+      const f = document.getElementById('reading-frame');
+      if (!f.src) f.src = f.dataset.src;
+    });
+  </script>
 </body>
 </html>

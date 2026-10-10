@@ -2216,7 +2216,7 @@ function installKeyBar(){
   const back = document.createElement('a');
   back.href = 'index.html'; back.textContent = '← Kelime Defterim';
   back.style.cssText = 'position:fixed;top:12px;left:8px;z-index:30;font-size:.85rem';
-  document.body.appendChild(back);
+  if (window.top === window) document.body.appendChild(back);
 }
 
 // ---------- boot ----------

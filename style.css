@@ -696,3 +696,5 @@ button:hover {
   font-weight: 600;
   cursor: pointer;
 }
+
+#reading-frame { width: 100%; height: calc(100vh - 150px); min-height: 520px; border: 0; background: #fff; }
